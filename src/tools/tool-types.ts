@@ -4,32 +4,6 @@
 
 import { ChildProcess } from 'child_process';
 
-// Tool definition
-export interface FlutterTool {
-  name: string;
-  description: string;
-  inputSchema: {
-    type: string;
-    properties: Record<string, any>;
-    required?: string[];
-  };
-  execute: (args: Record<string, any>) => Promise<{
-    isError?: boolean;
-    content: Array<{
-      type: string;
-      text?: string;
-      data?: string;
-      mimeType?: string;
-      resource?: {
-        uri: string;
-        text?: string;
-        data?: string;
-        mimeType?: string;
-      };
-    }>;
-  }>;
-}
-
 // Flutter app instance
 export interface FlutterAppInstance {
   id: string;

@@ -4,8 +4,8 @@
 
 import { spawn } from 'child_process';
 import { v4 as uuidv4 } from 'uuid';
-import { FlutterAppInstance, NetworkRequest } from './tool-types';
-import { logger } from '../utils/logger';
+import { FlutterAppInstance, NetworkRequest } from './tool-types.js';
+import { logger } from '../utils/logger.js';
 
 // Maximum number of logs to keep in memory per app
 const MAX_LOGS = 1000;
