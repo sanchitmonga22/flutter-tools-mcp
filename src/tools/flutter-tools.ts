@@ -142,7 +142,7 @@ export async function getLogs({ appId, limit = 100, filter }: {
   try {
     logger.info(`Getting logs for Flutter app with ID ${appId}`);
     
-    const app = getAppInstance(appId);
+    const app = await getAppInstance(appId);
     
     if (!app) {
       return {
@@ -186,7 +186,7 @@ export async function takeScreenshot({ appId }: { appId: string }) {
   try {
     logger.info(`Taking screenshot for Flutter app with ID ${appId}`);
     
-    const app = getAppInstance(appId);
+    const app = await getAppInstance(appId);
     
     if (!app) {
       return {
@@ -258,7 +258,7 @@ export async function getNetworkData({ appId, limit = 50 }: {
   try {
     logger.info(`Getting network data for Flutter app with ID ${appId}`);
     
-    const app = getAppInstance(appId);
+    const app = await getAppInstance(appId);
     
     if (!app) {
       return {
@@ -310,7 +310,7 @@ export async function getPerformanceData({ appId }: { appId: string }) {
   try {
     logger.info(`Getting performance data for Flutter app with ID ${appId}`);
     
-    const app = getAppInstance(appId);
+    const app = await getAppInstance(appId);
     
     if (!app) {
       return {
@@ -358,7 +358,7 @@ export async function hotReload({ appId }: { appId: string }) {
   try {
     logger.info(`Triggering hot reload for Flutter app with ID ${appId}`);
     
-    const app = getAppInstance(appId);
+    const app = await getAppInstance(appId);
     
     if (!app) {
       return {
@@ -417,7 +417,7 @@ export async function listRunningApps() {
   try {
     logger.info('Listing all running Flutter apps');
     
-    const apps = getAppInstances();
+    const apps = await getAppInstances();
     
     if (apps.length === 0) {
       return {

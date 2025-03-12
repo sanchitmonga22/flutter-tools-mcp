@@ -2,10 +2,11 @@
  * Flutter app instance manager
  */
 
-import { spawn } from 'child_process';
+import { spawn, exec } from 'child_process';
 import { v4 as uuidv4 } from 'uuid';
 import { FlutterAppInstance, NetworkRequest } from './tool-types.js';
 import { logger } from '../utils/logger.js';
+import { promisify } from 'util';
 
 // Maximum number of logs to keep in memory per app
 const MAX_LOGS = 1000;
@@ -13,7 +14,11 @@ const MAX_LOGS = 1000;
 // Maximum number of network requests to track per app
 const MAX_NETWORK_REQUESTS = 100;
 
-// In-memory store of running Flutter app instances
+// Promisify exec for async/await usage
+const execAsync = promisify(exec);
+
+// In-memory store of running Flutter app instances - only used for apps started by this server
+// This helps us maintain state for apps we started (logs, etc.)
 const appInstances: Map<string, FlutterAppInstance> = new Map();
 
 /**
@@ -153,8 +158,24 @@ export async function stopFlutterApp(id: string): Promise<boolean> {
   const appInstance = appInstances.get(id);
   
   if (!appInstance) {
-    logger.warn(`App instance not found: ${id}`);
-    return false;
+    logger.warn(`App instance not found in managed instances: ${id}`);
+    
+    // Try to find the app in system processes and kill it
+    try {
+      const systemApps = await detectSystemFlutterApps();
+      const systemApp = systemApps.find(app => app.id === id);
+      
+      if (systemApp && systemApp.process) {
+        logger.info(`Found system Flutter app with ID ${id}, attempting to stop it`);
+        systemApp.process.kill();
+        return true;
+      }
+      
+      return false;
+    } catch (error) {
+      logger.error(`Error stopping system Flutter app: ${error}`);
+      return false;
+    }
   }
   
   try {
@@ -174,17 +195,191 @@ export async function stopFlutterApp(id: string): Promise<boolean> {
 }
 
 /**
- * Get all app instances
+ * Get all app instances - combines managed instances with detected system instances
  */
-export function getAppInstances(): FlutterAppInstance[] {
-  return Array.from(appInstances.values());
+export async function getAppInstances(): Promise<FlutterAppInstance[]> {
+  try {
+    // Get managed instances
+    const managedApps = Array.from(appInstances.values());
+    
+    // Get system instances
+    const systemApps = await detectSystemFlutterApps();
+    
+    // Combine both lists, avoiding duplicates by PID
+    const managedPids = new Set(
+      managedApps
+        .filter(app => app.process && app.process.pid)
+        .map(app => app.process!.pid)
+    );
+    
+    // Filter out system apps that are already in managed apps
+    const uniqueSystemApps = systemApps.filter(app => 
+      app.process && app.process.pid && !managedPids.has(app.process.pid)
+    );
+    
+    return [...managedApps, ...uniqueSystemApps];
+  } catch (error) {
+    logger.error(`Error getting app instances: ${error}`);
+    return Array.from(appInstances.values());
+  }
 }
 
 /**
  * Get app instance by ID
  */
-export function getAppInstance(id: string): FlutterAppInstance | undefined {
-  return appInstances.get(id);
+export async function getAppInstance(id: string): Promise<FlutterAppInstance | undefined> {
+  // First check managed instances
+  const managedApp = appInstances.get(id);
+  if (managedApp) {
+    return managedApp;
+  }
+  
+  // If not found, check system instances
+  try {
+    const systemApps = await detectSystemFlutterApps();
+    return systemApps.find(app => app.id === id);
+  } catch (error) {
+    logger.error(`Error finding system app instance: ${error}`);
+    return undefined;
+  }
+}
+
+/**
+ * Detect Flutter apps running on the system
+ */
+async function detectSystemFlutterApps(): Promise<FlutterAppInstance[]> {
+  try {
+    logger.info('Detecting system-wide Flutter processes');
+    
+    // Command to find Flutter processes - more inclusive search
+    const cmd = process.platform === 'win32'
+      ? 'tasklist /FI "IMAGENAME eq flutter.exe" /FO CSV'
+      : 'ps aux | grep -E "flutter|dart" | grep -v grep';
+    
+    const { stdout } = await execAsync(cmd);
+    logger.debug(`Process detection output: ${stdout}`);
+    
+    if (!stdout.trim()) {
+      logger.info('No system Flutter processes detected');
+      return [];
+    }
+    
+    // Parse the output to extract process information
+    const lines = stdout.split('\n').filter(line => {
+      const isRelevant = line.trim() && (
+        line.includes('flutter') || 
+        (line.includes('dart') && line.includes('flutter_tools'))
+      );
+      if (isRelevant) {
+        logger.debug(`Found relevant process line: ${line}`);
+      }
+      return isRelevant;
+    });
+    
+    // Create app instances for each detected process
+    const systemApps: FlutterAppInstance[] = [];
+    
+    for (const line of lines) {
+      try {
+        // Extract PID
+        const match = process.platform === 'win32'
+          ? line.match(/"flutter\.exe","(\d+)"/)
+          : line.match(/\s+(\d+)\s+/);
+        
+        if (!match) {
+          logger.debug(`Could not extract PID from line: ${line}`);
+          continue;
+        }
+        
+        const pid = parseInt(match[1], 10);
+        if (isNaN(pid)) {
+          logger.debug(`Invalid PID extracted: ${match[1]}`);
+          continue;
+        }
+        
+        logger.debug(`Processing PID: ${pid}`);
+        
+        // Get detailed command info
+        const { stdout: cmdDetails } = await execAsync(`ps -p ${pid} -o command=`);
+        logger.debug(`Command details for PID ${pid}: ${cmdDetails}`);
+        
+        // Check for Flutter run commands or debug adapter
+        if (!cmdDetails.includes('flutter_tools.snapshot run') && 
+            !cmdDetails.includes('flutter run') &&
+            !cmdDetails.includes('debug_adapter')) {
+          logger.debug(`Skipping PID ${pid} - not a Flutter run command`);
+          continue;
+        }
+        
+        // Extract device ID and project path
+        const deviceIdMatch = cmdDetails.match(/-d\s+([^\s]+)/);
+        const targetMatch = cmdDetails.match(/--target\s+([^\s]+)/);
+        
+        const deviceId = deviceIdMatch ? deviceIdMatch[1] : 'unknown';
+        let projectPath = 'unknown';
+        
+        if (targetMatch) {
+          // Extract project root from main.dart path
+          const mainDartPath = targetMatch[1];
+          projectPath = mainDartPath.replace(/\/lib\/main.dart$/, '');
+          logger.debug(`Extracted project path: ${projectPath}`);
+        }
+        
+        // Create a synthetic process object
+        const syntheticProcess: any = {
+          pid,
+          kill: () => {
+            try {
+              return execAsync(`kill ${pid}`);
+            } catch (e) {
+              logger.error(`Failed to kill process ${pid}: ${e}`);
+              throw e;
+            }
+          }
+        };
+        
+        // Create app instance
+        const appInstance: FlutterAppInstance = {
+          id: `system-${pid}`,
+          process: syntheticProcess,
+          projectPath,
+          deviceId,
+          logs: [`[INFO] System-detected Flutter process (PID: ${pid})`],
+          status: 'running',
+          networkRequests: [],
+          performanceData: {
+            measurements: []
+          }
+        };
+        
+        // Try to get VM service URL from the process environment or logs
+        try {
+          const { stdout: vmServiceInfo } = await execAsync(`lsof -p ${pid} | grep -E 'dart_vm|Observatory'`);
+          logger.debug(`VM service info for PID ${pid}: ${vmServiceInfo}`);
+          
+          const vmServiceMatch = vmServiceInfo.match(/(https?:\/\/[^\s]+)/);
+          if (vmServiceMatch) {
+            appInstance.vmServiceUrl = vmServiceMatch[1];
+            logger.debug(`Found VM service URL: ${appInstance.vmServiceUrl}`);
+          }
+        } catch (error) {
+          // VM service URL detection is optional
+          logger.debug(`Could not detect VM service URL for PID ${pid}: ${error}`);
+        }
+        
+        systemApps.push(appInstance);
+        logger.debug(`Added app instance for PID ${pid}`);
+      } catch (error) {
+        logger.debug(`Error parsing process line: ${error}`);
+      }
+    }
+    
+    logger.info(`Detected ${systemApps.length} system Flutter processes`);
+    return systemApps;
+  } catch (error) {
+    logger.error(`Error detecting system Flutter processes: ${error}`);
+    return [];
+  }
 }
 
 /**
