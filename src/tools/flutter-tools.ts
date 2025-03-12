@@ -2,7 +2,6 @@
  * Flutter tools implementation
  */
 
-import { spawn } from 'child_process';
 import { promises as fs } from 'fs';
 import { resolve } from 'path';
 import { z } from "zod";

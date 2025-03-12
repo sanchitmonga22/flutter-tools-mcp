@@ -41,6 +41,52 @@ npm install -g @flutter-tools/mcp
 npx @flutter-tools/mcp
 ```
 
+## 🛠️ Development Setup
+
+### Cloning and Running Locally
+
+If you want to run the Flutter Tools MCP from source or contribute to its development, follow these steps:
+
+```bash
+# Clone the repository
+git clone https://github.com/flutter-tools/mcp.git
+cd flutter-tools-mcp
+
+# Install dependencies
+npm install
+
+# Build the project
+npm run build
+
+# Run the MCP server
+node build/index.js
+```
+
+### Connecting to Cursor with Local Build
+
+To connect your locally built Flutter Tools MCP to Cursor:
+
+1. Open Cursor IDE and go to Settings (⚙️)
+2. Navigate to the "MCP" section in the sidebar
+3. Click on "Add new MCP server"
+4. Configure the server with the following information:
+   - **Name**: Flutter Tools Local (or any name you prefer)
+   - **Command**: `node /path/to/your/clone/flutter-tools-mcp/build/index.js`
+   - Replace `/path/to/your/clone` with the actual path where you cloned the repository
+
+5. Click "Add" to save the server configuration
+6. The Flutter tools will now be available to use in your AI conversations
+
+### Troubleshooting Connection Issues
+
+If you encounter "Client closed" or "No tools available" issues:
+
+1. **Verify Build**: Ensure the project is built correctly with `npm run build`
+2. **Check Permissions**: Make sure `build/index.js` has execute permissions (`chmod +x build/index.js`)
+3. **Restart Cursor**: After adding the MCP server, restart Cursor to ensure changes take effect
+4. **Use Absolute Path**: Use the full absolute path to the `build/index.js` file in the command
+5. **Check Requirements**: Ensure Flutter SDK is installed and available in your PATH
+
 ## 🔌 Connecting with MCP Clients
 
 ### Cursor IDE
