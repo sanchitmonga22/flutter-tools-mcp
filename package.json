@@ -1,0 +1,47 @@
+{
+  "name": "flutter-tools-mcp",
+  "version": "1.0.0",
+  "description": "Flutter development tools for Model Context Protocol integration",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "flutter",
+    "development",
+    "tools",
+    "mcp",
+    "model-context-protocol",
+    "ai",
+    "debugging"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yourusername/flutter-tools-mcp.git"
+  },
+  "author": "Flutter Tools MCP Contributors",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/yourusername/flutter-tools-mcp/issues"
+  },
+  "homepage": "https://github.com/yourusername/flutter-tools-mcp#readme",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.7.0",
+    "child_process": "^1.0.2",
+    "fs": "^0.0.1-security",
+    "path": "^0.12.7",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.2",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "@types/uuid": "^10.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
