@@ -1,13 +1,66 @@
 // Helper functions for screenshot functionality
 
-import { spawn } from "child_process";
+import { spawn, exec } from "child_process";
 import { logger } from "../utils/logger.js";
 import fs from "fs/promises";
+import path from "path";
+import os from "os";
+import { promisify } from "util";
+
+const execAsync = promisify(exec);
+
+// Get user's Downloads folder
+function getDownloadsPath(): string {
+  const homeDir = os.homedir();
+  return path.join(homeDir, 'Downloads');
+}
+
+// Generate a unique filename for the screenshot
+function generateScreenshotFilename(): string {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  return `flutter_screenshot_${timestamp}.png`;
+}
+
+// Copy image to clipboard based on platform
+async function copyImageToClipboard(imagePath: string): Promise<boolean> {
+  try {
+    const platform = process.platform;
+    
+    if (platform === 'darwin') {
+      // macOS
+      await execAsync(`osascript -e 'set the clipboard to (read (POSIX file "${imagePath}") as TIFF picture)'`);
+      logger.info('Screenshot copied to clipboard (macOS)');
+      return true;
+    } else if (platform === 'win32') {
+      // Windows - requires PowerShell
+      const psScript = `
+        Add-Type -AssemblyName System.Windows.Forms
+        $img = [System.Drawing.Image]::FromFile('${imagePath.replace(/\\/g, '\\\\')}')
+        [System.Windows.Forms.Clipboard]::SetImage($img)
+      `;
+      await execAsync(`powershell -command "${psScript}"`);
+      logger.info('Screenshot copied to clipboard (Windows)');
+      return true;
+    } else if (platform === 'linux') {
+      // Linux - requires xclip
+      await execAsync(`xclip -selection clipboard -t image/png -i "${imagePath}"`);
+      logger.info('Screenshot copied to clipboard (Linux)');
+      return true;
+    } else {
+      logger.warn(`Clipboard copy not supported on platform: ${platform}`);
+      return false;
+    }
+  } catch (error) {
+    logger.error(`Failed to copy image to clipboard: ${error}`);
+    return false;
+  }
+}
 
 export async function takeAndroidEmulatorScreenshot(deviceId: string): Promise<string | null> {
     try {
-      // Create temp file name 
-      const tempFilePath = `/tmp/flutter_screenshot_${Date.now()}.png`;
+      const downloadsPath = getDownloadsPath();
+      const filename = generateScreenshotFilename();
+      const savePath = path.join(downloadsPath, filename);
       
       // Execute ADB to take screenshot
       const adbProcess = spawn('adb', ['-s', deviceId, 'exec-out', 'screencap', '-p'], { stdio: 'pipe' });
@@ -26,8 +79,15 @@ export async function takeAndroidEmulatorScreenshot(deviceId: string): Promise<s
         return null;
       }
       
-      // Combine chunks and convert to base64
+      // Combine chunks and save to file
       const buffer = Buffer.concat(chunks);
+      await fs.writeFile(savePath, buffer);
+      logger.info(`Screenshot saved to: ${savePath}`);
+      
+      // Try to copy to clipboard
+      await copyImageToClipboard(savePath);
+      
+      // Also return as base64 for clients that support it
       return buffer.toString('base64');
     } catch (error) {
       logger.error('Error taking Android screenshot:', error);
@@ -37,11 +97,12 @@ export async function takeAndroidEmulatorScreenshot(deviceId: string): Promise<s
   
 export async function takeIOSSimulatorScreenshot(): Promise<string | null> {
     try {
-      // Create temp file name 
-      const tempFilePath = `/tmp/flutter_screenshot_${Date.now()}.png`;
+      const downloadsPath = getDownloadsPath();
+      const filename = generateScreenshotFilename();
+      const savePath = path.join(downloadsPath, filename);
       
       // Execute xcrun simctl to take screenshot
-      const xcrunProcess = spawn('xcrun', ['simctl', 'io', 'booted', 'screenshot', tempFilePath], { stdio: 'pipe' });
+      const xcrunProcess = spawn('xcrun', ['simctl', 'io', 'booted', 'screenshot', savePath], { stdio: 'pipe' });
       
       // Wait for process to finish
       const exitCode = await new Promise(resolve => {
@@ -53,14 +114,15 @@ export async function takeIOSSimulatorScreenshot(): Promise<string | null> {
         return null;
       }
       
-      // Read the file and convert to base64
-      const fileData = await fs.readFile(tempFilePath);
-      const base64Data = fileData.toString('base64');
+      // Read the file for base64 conversion
+      const fileData = await fs.readFile(savePath);
+      logger.info(`Screenshot saved to: ${savePath}`);
       
-      // Clean up temp file
-      await fs.unlink(tempFilePath);
+      // Try to copy to clipboard
+      await copyImageToClipboard(savePath);
       
-      return base64Data;
+      // Return base64 for clients that support it
+      return fileData.toString('base64');
     } catch (error) {
       logger.error('Error taking iOS screenshot:', error);
       return null;
@@ -69,9 +131,10 @@ export async function takeIOSSimulatorScreenshot(): Promise<string | null> {
   
 export async function takeAndroidPhysicalDeviceScreenshot(deviceId: string): Promise<string | null> {
     try {
-      // Create temp file paths
-      const deviceTempPath = `/sdcard/flutter_screenshot_${Date.now()}.png`;
-      const localTempPath = `/tmp/flutter_screenshot_${Date.now()}.png`;
+      const downloadsPath = getDownloadsPath();
+      const filename = generateScreenshotFilename();
+      const savePath = path.join(downloadsPath, filename);
+      const deviceTempPath = `/sdcard/temp_${filename}`;
       
       // Take screenshot on device
       let adbProcess = spawn('adb', ['-s', deviceId, 'shell', 'screencap', '-p', deviceTempPath], { stdio: 'pipe' });
@@ -84,8 +147,8 @@ export async function takeAndroidPhysicalDeviceScreenshot(deviceId: string): Pro
         return null;
       }
       
-      // Pull file from device
-      adbProcess = spawn('adb', ['-s', deviceId, 'pull', deviceTempPath, localTempPath], { stdio: 'pipe' });
+      // Pull file from device to downloads folder
+      adbProcess = spawn('adb', ['-s', deviceId, 'pull', deviceTempPath, savePath], { stdio: 'pipe' });
       exitCode = await new Promise(resolve => {
         adbProcess.on('close', resolve);
       });
@@ -95,17 +158,18 @@ export async function takeAndroidPhysicalDeviceScreenshot(deviceId: string): Pro
         return null;
       }
       
-      // Remove file from device
+      // Remove temp file from device
       adbProcess = spawn('adb', ['-s', deviceId, 'shell', 'rm', deviceTempPath], { stdio: 'pipe' });
       
-      // Read the file and convert to base64
-      const fileData = await fs.readFile(localTempPath);
-      const base64Data = fileData.toString('base64');
+      // Read the file for base64 conversion
+      const fileData = await fs.readFile(savePath);
+      logger.info(`Screenshot saved to: ${savePath}`);
       
-      // Clean up temp file
-      await fs.unlink(localTempPath);
+      // Try to copy to clipboard
+      await copyImageToClipboard(savePath);
       
-      return base64Data;
+      // Return base64 for clients that support it
+      return fileData.toString('base64');
     } catch (error) {
       logger.error('Error taking Android physical device screenshot:', error);
       return null;

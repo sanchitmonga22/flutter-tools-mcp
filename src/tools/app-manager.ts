@@ -352,19 +352,44 @@ async function detectSystemFlutterApps(): Promise<FlutterAppInstance[]> {
           }
         };
         
-        // Try to get VM service URL from the process environment or logs
+        // Try multiple methods to get VM service URL
         try {
+          // Method 1: Check process file descriptors
           const { stdout: vmServiceInfo } = await execAsync(`lsof -p ${pid} | grep -E 'dart_vm|Observatory'`);
-          logger.debug(`VM service info for PID ${pid}: ${vmServiceInfo}`);
+          logger.debug(`VM service info from lsof for PID ${pid}: ${vmServiceInfo}`);
           
-          const vmServiceMatch = vmServiceInfo.match(/(https?:\/\/[^\s]+)/);
+          let vmServiceMatch = vmServiceInfo.match(/(https?:\/\/[^\s]+)/);
+          
+          if (!vmServiceMatch) {
+            // Method 2: Check process environment
+            const { stdout: envInfo } = await execAsync(`ps eww ${pid}`);
+            logger.debug(`Process environment for PID ${pid}: ${envInfo}`);
+            
+            vmServiceMatch = envInfo.match(/OBSERVATORY_URI=(https?:\/\/[^\s]+)/);
+          }
+          
+          if (!vmServiceMatch) {
+            // Method 3: Check Flutter logs in /tmp
+            const { stdout: tmpFiles } = await execAsync('ls -t /tmp/flutter_tools.*.log');
+            const latestLog = tmpFiles.split('\n')[0];
+            
+            if (latestLog) {
+              const { stdout: logContent } = await execAsync(`grep "Observatory listening on" "${latestLog}"`);
+              logger.debug(`Flutter log content for PID ${pid}: ${logContent}`);
+              
+              vmServiceMatch = logContent.match(/Observatory listening on (https?:\/\/[^\s]+)/);
+            }
+          }
+          
           if (vmServiceMatch) {
             appInstance.vmServiceUrl = vmServiceMatch[1];
             logger.debug(`Found VM service URL: ${appInstance.vmServiceUrl}`);
+          } else {
+            logger.debug(`Could not find VM service URL for PID ${pid} using any method`);
           }
         } catch (error) {
           // VM service URL detection is optional
-          logger.debug(`Could not detect VM service URL for PID ${pid}: ${error}`);
+          logger.debug(`Error detecting VM service URL for PID ${pid}: ${error}`);
         }
         
         systemApps.push(appInstance);

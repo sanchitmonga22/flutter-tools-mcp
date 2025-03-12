@@ -213,8 +213,13 @@ export async function takeScreenshot({ appId }: { appId: string }) {
     if (deviceId.includes('emulator-') || deviceId.includes('emulator:')) {
       // Android emulator
       screenshotData = await takeAndroidEmulatorScreenshot(deviceId);
-    } else if (deviceId.includes('simulator-') || deviceId === 'default') {
-      // iOS simulator (or default, which we'll assume is iOS simulator)
+    } else if (
+      deviceId.includes('simulator-') || 
+      deviceId === 'default' ||
+      // Match iOS simulator UUID pattern
+      /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i.test(deviceId)
+    ) {
+      // iOS simulator
       screenshotData = await takeIOSSimulatorScreenshot();
     } else {
       // Try a general adb method for physical devices
@@ -230,11 +235,13 @@ export async function takeScreenshot({ appId }: { appId: string }) {
       };
     }
     
+    // Only return text content since image type is not supported
     return {
       content: [{
-        type: "image" as const,
-        data: screenshotData,
-        mimeType: "image/png"
+        type: "text" as const,
+        text: `📸 Screenshot captured successfully!\n\n` +
+              `✅ Saved to your Downloads folder with filename pattern: flutter_screenshot_YYYY-MM-DDTHH-mm-ss.png\n\n` +
+              `✅ The screenshot has also been copied to your clipboard. You can paste it directly into this chat by clicking in the input field and pressing Cmd+V (Mac) or Ctrl+V (Windows/Linux).`
       }]
     };
   } catch (error) {
