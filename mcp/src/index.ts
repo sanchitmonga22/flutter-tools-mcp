@@ -17,6 +17,7 @@ import {
   hotReload, hotReloadSchema,
   listRunningApps, listRunningAppsSchema
 } from './tools/flutter-tools.js';
+import { initConnectorClient, configureConnectorClient } from './tools/flutter-connector-client.js';
 
 // Create server instance
 const server = new McpServer({
@@ -94,6 +95,34 @@ server.tool(
 // Start the server
 async function main(): Promise<void> {
   try {
+    // Configure and initialize the Flutter Connector Client
+    logger.info("Initializing Flutter Connector Client...");
+    
+    // Configure from environment variables if available
+    const connectorHost = process.env.FLUTTER_CONNECTOR_HOST || 'localhost';
+    const connectorPort = process.env.FLUTTER_CONNECTOR_PORT 
+      ? parseInt(process.env.FLUTTER_CONNECTOR_PORT, 10) 
+      : 3030;
+    
+    configureConnectorClient({
+      host: connectorHost,
+      port: connectorPort
+    });
+    
+    // Try to connect to the Flutter Connector Server
+    try {
+      const connected = await initConnectorClient();
+      if (connected) {
+        logger.info("Successfully connected to Flutter Connector Server");
+      } else {
+        logger.warn("Could not connect to Flutter Connector Server. Some functionality may be limited.");
+      }
+    } catch (error) {
+      logger.warn(`Error connecting to Flutter Connector Server: ${error instanceof Error ? error.message : String(error)}`);
+      logger.warn("Continuing without Flutter Connector Server. Some functionality may be limited.");
+    }
+    
+    // Start the MCP server
     const transport = new StdioServerTransport();
     logger.info("Connecting to transport...");
     await server.connect(transport);
