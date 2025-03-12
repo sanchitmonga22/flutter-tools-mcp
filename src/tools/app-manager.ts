@@ -2,9 +2,9 @@
  * Flutter app instance manager
  */
 
-import { spawn, ChildProcess } from 'child_process';
+import { spawn } from 'child_process';
 import { v4 as uuidv4 } from 'uuid';
-import { FlutterAppInstance, NetworkRequest, PerformanceData } from './tool-types';
+import { FlutterAppInstance, NetworkRequest } from './tool-types';
 import { logger } from '../utils/logger';
 
 // Maximum number of logs to keep in memory per app

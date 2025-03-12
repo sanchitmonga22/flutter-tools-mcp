@@ -1,12 +1,22 @@
 {
-  "name": "flutter-tools-mcp",
+  "name": "@flutter-tools/mcp",
   "version": "1.0.0",
   "description": "Flutter development tools for Model Context Protocol integration",
   "main": "dist/index.js",
+  "bin": {
+    "flutter-tools-mcp": "./start.js"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md",
+    "start.js"
+  ],
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
+    "prepublishOnly": "npm run build",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
@@ -20,14 +30,14 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/yourusername/flutter-tools-mcp.git"
+    "url": "git+https://github.com/flutter-tools/mcp.git"
   },
   "author": "Flutter Tools MCP Contributors",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/yourusername/flutter-tools-mcp/issues"
+    "url": "https://github.com/flutter-tools/mcp/issues"
   },
-  "homepage": "https://github.com/yourusername/flutter-tools-mcp#readme",
+  "homepage": "https://github.com/flutter-tools/mcp#readme",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.7.0",
     "child_process": "^1.0.2",
@@ -43,5 +53,8 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

@@ -50,3 +50,5 @@ Thumbs.db
 # Lock files (remove this if you want to track your lock file)
 # package-lock.json
 # yarn.lock
+
+use-cases.md
