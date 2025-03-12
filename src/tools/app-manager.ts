@@ -325,7 +325,7 @@ async function detectSystemFlutterApps(): Promise<FlutterAppInstance[]> {
           logger.debug(`Extracted project path: ${projectPath}`);
         }
         
-        // Create a synthetic process object
+        // Create a synthetic process object with stdin for hot reload
         const syntheticProcess: any = {
           pid,
           kill: () => {
@@ -335,8 +335,51 @@ async function detectSystemFlutterApps(): Promise<FlutterAppInstance[]> {
               logger.error(`Failed to kill process ${pid}: ${e}`);
               throw e;
             }
+          },
+          // Add a synthetic stdin object that will use VM service for hot reload
+          stdin: {
+            write: async (data: string) => {
+              if (data.includes('r')) {
+                logger.info(`Triggering hot reload for system process ${pid} via VM service`);
+                return triggerHotReloadViaVMService(pid);
+              }
+              return false;
+            }
           }
         };
+        
+        // Initialize logs array with basic info
+        const initialLogs = [`[INFO] System-detected Flutter process (PID: ${pid})`];
+        
+        // Try to get recent logs from the Flutter process
+        try {
+          // Check if there are Flutter log files for this process
+          const { stdout: logFiles } = await execAsync(`find /tmp -name "flutter_tools.*.log" -mtime -1 | sort -r`);
+          
+          if (logFiles.trim()) {
+            const recentLogFile = logFiles.split('\n')[0];
+            logger.info(`Found recent Flutter log file: ${recentLogFile}`);
+            
+            // Get the last 100 lines from the log file
+            const { stdout: recentLogs } = await execAsync(`tail -n 100 "${recentLogFile}"`);
+            
+            // Add these logs to our initial logs
+            const logLines = recentLogs.split('\n').filter(line => line.trim());
+            initialLogs.push(...logLines.map(line => line.trim()));
+            
+            logger.info(`Added ${logLines.length} log lines from Flutter log file`);
+          }
+          
+          // Also try to get logs directly from the process output
+          const { stdout: processLogs } = await execAsync(`ps -p ${pid} -o command= | xargs -I{} lsof -p ${pid} | grep -E 'stdout|stderr'`);
+          
+          if (processLogs.trim()) {
+            logger.info(`Found process stdout/stderr file descriptors for PID ${pid}`);
+            // We could potentially set up a file watcher here for real-time logs
+          }
+        } catch (logError) {
+          logger.debug(`Error getting logs for PID ${pid}: ${logError}`);
+        }
         
         // Create app instance
         const appInstance: FlutterAppInstance = {
@@ -344,7 +387,7 @@ async function detectSystemFlutterApps(): Promise<FlutterAppInstance[]> {
           process: syntheticProcess,
           projectPath,
           deviceId,
-          logs: [`[INFO] System-detected Flutter process (PID: ${pid})`],
+          logs: initialLogs,
           status: 'running',
           networkRequests: [],
           performanceData: {
@@ -384,6 +427,14 @@ async function detectSystemFlutterApps(): Promise<FlutterAppInstance[]> {
           if (vmServiceMatch) {
             appInstance.vmServiceUrl = vmServiceMatch[1];
             logger.debug(`Found VM service URL: ${appInstance.vmServiceUrl}`);
+            
+            // If we have a VM service URL, we can use it to get more logs
+            try {
+              // Set up a function to periodically fetch logs via VM service
+              setupVMServiceLogFetching(appInstance);
+            } catch (vmLogError) {
+              logger.debug(`Error setting up VM service log fetching: ${vmLogError}`);
+            }
           } else {
             logger.debug(`Could not find VM service URL for PID ${pid} using any method`);
           }
@@ -404,6 +455,84 @@ async function detectSystemFlutterApps(): Promise<FlutterAppInstance[]> {
   } catch (error) {
     logger.error(`Error detecting system Flutter processes: ${error}`);
     return [];
+  }
+}
+
+/**
+ * Trigger hot reload via VM service URL
+ */
+async function triggerHotReloadViaVMService(pid: number): Promise<boolean> {
+  try {
+    // First, find the VM service URL for this process
+    const systemApps = await detectSystemFlutterApps();
+    const app = systemApps.find(app => app.process && app.process.pid === pid);
+    
+    if (!app || !app.vmServiceUrl) {
+      logger.error(`Cannot trigger hot reload: VM service URL not found for PID ${pid}`);
+      return false;
+    }
+    
+    // Parse the VM service URL
+    const vmServiceUrl = new URL(app.vmServiceUrl);
+    
+    // The correct endpoint for Flutter hot reload is _flutter/reload
+    // We need to find the isolate ID first
+    logger.info(`Getting isolate ID from VM service at ${app.vmServiceUrl}`);
+    
+    // First, get the list of isolates
+    const getVMInfoCmd = `curl -s "${app.vmServiceUrl}/vm"`;
+    const { stdout: vmInfo } = await execAsync(getVMInfoCmd);
+    
+    try {
+      const vmData = JSON.parse(vmInfo);
+      if (!vmData.isolates || vmData.isolates.length === 0) {
+        logger.error('No isolates found in VM');
+        return false;
+      }
+      
+      // Get the first isolate ID
+      const isolateId = vmData.isolates[0].id;
+      logger.info(`Found isolate ID: ${isolateId}`);
+      
+      // Now trigger hot reload using the Flutter service protocol
+      const hotReloadCmd = `curl -s -X POST "${app.vmServiceUrl}/_flutter/reload?isolateId=${isolateId}&pause=false&reason=manual"`;
+      logger.info(`Executing hot reload command: ${hotReloadCmd}`);
+      
+      const { stdout: reloadResult } = await execAsync(hotReloadCmd);
+      logger.info(`Hot reload result: ${reloadResult}`);
+      
+      // Check if reload was successful
+      try {
+        const reloadData = JSON.parse(reloadResult);
+        if (reloadData.success === true) {
+          logger.info(`Hot reload successful for PID ${pid}`);
+          return true;
+        } else {
+          logger.error(`Hot reload failed: ${reloadData.message || 'Unknown error'}`);
+          return false;
+        }
+      } catch (parseError) {
+        logger.error(`Error parsing reload result: ${parseError}`);
+        return false;
+      }
+    } catch (parseError) {
+      logger.error(`Error parsing VM info: ${parseError}`);
+      
+      // Alternative approach: try the legacy service protocol
+      try {
+        logger.info('Trying legacy hot reload approach...');
+        const legacyReloadCmd = `curl -s -X POST "${app.vmServiceUrl}/hot-reload"`;
+        await execAsync(legacyReloadCmd);
+        logger.info(`Legacy hot reload triggered for PID ${pid}`);
+        return true;
+      } catch (legacyError) {
+        logger.error(`Legacy hot reload failed: ${legacyError}`);
+        return false;
+      }
+    }
+  } catch (error) {
+    logger.error(`Error triggering hot reload via VM service: ${error}`);
+    return false;
   }
 }
 
@@ -463,4 +592,67 @@ function parseNetworkRequestFromLog(log: string): NetworkRequest | null {
     requestTime: Date.now(),
     // Other fields will be populated when/if response is detected
   };
+}
+
+/**
+ * Set up periodic log fetching via VM service
+ */
+function setupVMServiceLogFetching(appInstance: FlutterAppInstance): void {
+  if (!appInstance.vmServiceUrl) {
+    logger.debug(`Cannot set up VM service log fetching: no VM service URL for app ${appInstance.id}`);
+    return;
+  }
+  
+  // Store the last log fetch time to avoid duplicates
+  let lastLogFetchTime = Date.now();
+  
+  // Set up a periodic fetch (every 5 seconds)
+  const fetchInterval = setInterval(async () => {
+    try {
+      // Only fetch logs if the app is still running
+      if (appInstance.status !== 'running') {
+        clearInterval(fetchInterval);
+        return;
+      }
+      
+      // Fetch logs via VM service
+      const { stdout: logData } = await execAsync(`curl -s "${appInstance.vmServiceUrl}/getLogHistory"`);
+      
+      try {
+        const logResponse = JSON.parse(logData);
+        if (logResponse.result && logResponse.result.logs) {
+          const newLogs = logResponse.result.logs.filter((log: any) => log.timestamp > lastLogFetchTime);
+          
+          if (newLogs.length > 0) {
+            // Add new logs to the app instance
+            for (const log of newLogs) {
+              const logMessage = `[${log.level}] ${log.message}`;
+              appInstance.logs.push(logMessage);
+              
+              // Keep logs under the maximum size
+              if (appInstance.logs.length > MAX_LOGS) {
+                appInstance.logs.shift();
+              }
+            }
+            
+            logger.debug(`Added ${newLogs.length} new logs from VM service for app ${appInstance.id}`);
+            
+            // Update last fetch time
+            lastLogFetchTime = newLogs[newLogs.length - 1].timestamp;
+          }
+        }
+      } catch (parseError) {
+        logger.debug(`Error parsing VM service log response: ${parseError}`);
+      }
+    } catch (error) {
+      logger.debug(`Error fetching logs via VM service: ${error}`);
+    }
+  }, 5000);
+  
+  // Clean up interval if process is killed
+  if (appInstance.process) {
+    appInstance.process.on('exit', () => {
+      clearInterval(fetchInterval);
+    });
+  }
 } 

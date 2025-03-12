@@ -9,6 +9,10 @@ import { logger } from '../utils/logger.js';
 import { startFlutterApp, stopFlutterApp, getAppInstances, getAppInstance } from './app-manager.js';
 import { takeAndroidEmulatorScreenshot, takeIOSSimulatorScreenshot, takeAndroidPhysicalDeviceScreenshot } from './screenshot-util.js';
 
+// Import MAX_LOGS from app-manager
+// Since we can't directly import a constant from app-manager.ts, we'll define it here
+const MAX_LOGS = 1000;
+
 // Define Zod schemas for each tool
 export const startAppSchema = {
   projectPath: z.string().describe("Path to the Flutter project directory"),
@@ -153,6 +157,86 @@ export async function getLogs({ appId, limit = 100, filter }: {
       };
     }
     
+    // For system-detected apps, try to refresh logs first
+    if (app.id.startsWith('system-') && app.vmServiceUrl) {
+      try {
+        logger.info(`Attempting to refresh logs for system app ${appId} via VM service`);
+        
+        // Use the VM service to get the latest logs
+        const { exec } = require('child_process');
+        const util = require('util');
+        const execAsync = util.promisify(exec);
+        
+        const { stdout: logData } = await execAsync(`curl -s "${app.vmServiceUrl}/getLogHistory"`);
+        
+        try {
+          const logResponse = JSON.parse(logData);
+          if (logResponse.result && logResponse.result.logs && logResponse.result.logs.length > 0) {
+            // Get the most recent logs
+            const recentLogs = logResponse.result.logs.slice(-Math.min(logResponse.result.logs.length, 100));
+            
+            // Add these logs to our app instance
+            for (const log of recentLogs) {
+              const logMessage = `[${log.level}] ${log.message}`;
+              
+              // Only add if not already present
+              if (!app.logs.includes(logMessage)) {
+                app.logs.push(logMessage);
+                
+                // Keep logs under the maximum size
+                if (app.logs.length > MAX_LOGS) {
+                  app.logs.shift();
+                }
+              }
+            }
+            
+            logger.info(`Added ${recentLogs.length} new logs from VM service for app ${appId}`);
+          }
+        } catch (parseError) {
+          logger.debug(`Error parsing VM service log response: ${parseError}`);
+        }
+      } catch (error) {
+        logger.debug(`Error refreshing logs via VM service: ${error}`);
+      }
+      
+      // Also try to get logs from the Flutter log file
+      try {
+        const { exec } = require('child_process');
+        const util = require('util');
+        const execAsync = util.promisify(exec);
+        
+        // Find the most recent Flutter log file
+        const { stdout: logFiles } = await execAsync(`find /tmp -name "flutter_tools.*.log" -mtime -1 | sort -r`);
+        
+        if (logFiles.trim()) {
+          const recentLogFile = logFiles.split('\n')[0];
+          logger.info(`Found recent Flutter log file: ${recentLogFile}`);
+          
+          // Get the last 100 lines from the log file
+          const { stdout: recentLogs } = await execAsync(`tail -n 100 "${recentLogFile}"`);
+          
+          // Add these logs to our app instance
+          const logLines: string[] = recentLogs.split('\n').filter((line: string) => line.trim());
+          
+          for (const line of logLines) {
+            // Only add if not already present
+            if (!app.logs.includes(line.trim())) {
+              app.logs.push(line.trim());
+              
+              // Keep logs under the maximum size
+              if (app.logs.length > MAX_LOGS) {
+                app.logs.shift();
+              }
+            }
+          }
+          
+          logger.info(`Added ${logLines.length} log lines from Flutter log file`);
+        }
+      } catch (logError) {
+        logger.debug(`Error getting logs from file: ${logError}`);
+      }
+    }
+    
     // Get logs, filter if needed, and take the limit
     let logs = app.logs;
     
@@ -161,6 +245,22 @@ export async function getLogs({ appId, limit = 100, filter }: {
     }
     
     logs = logs.slice(-Math.min(logs.length, limit));
+    
+    // Check if we have meaningful logs
+    if (logs.length <= 1 && app.id.startsWith('system-')) {
+      // If we only have the initial system detection log, provide more helpful information
+      return {
+        content: [{
+          type: "text" as const,
+          text: `Limited logs available for app with ID ${appId}. This is likely because the app was started outside of this tool.\n\n` +
+                `Available logs:\n${logs.join('\n')}\n\n` +
+                `To see more detailed logs, you can:\n` +
+                `1. Check the Flutter console in your IDE\n` +
+                `2. Look at the log files in /tmp/flutter_tools.*.log\n` +
+                `3. Restart the app using this tool to capture all logs`
+        }]
+      };
+    }
     
     return {
       content: [{
@@ -385,24 +485,113 @@ export async function hotReload({ appId }: { appId: string }) {
       };
     }
     
-    // Execute hot reload by sending 'r' to the Flutter process
+    let reloadSuccess = false;
+    let errorMessage = '';
+    
+    // Try multiple methods to trigger hot reload
+    
+    // Method 1: Use process stdin if available
     if (app.process && app.process.stdin) {
-      app.process.stdin.write('r\n');
-      
-      // Add to logs
-      app.logs.push('[INFO] Hot reload triggered');
-      
+      try {
+        logger.info(`Triggering hot reload via process stdin for app ID ${appId}`);
+        app.process.stdin.write('r\n');
+        
+        // Add to logs
+        app.logs.push('[INFO] Hot reload triggered via stdin');
+        
+        // Wait a bit to see if it worked
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Check if there's any error in the logs
+        const recentLogs = app.logs.slice(-10);
+        const hasError = recentLogs.some(log => 
+          log.includes('Error') || log.includes('error') || log.includes('failed')
+        );
+        
+        if (!hasError) {
+          reloadSuccess = true;
+        } else {
+          errorMessage = 'Stdin method failed. Check logs for details.';
+        }
+      } catch (error) {
+        logger.error(`Error triggering hot reload via stdin: ${error}`);
+        errorMessage = error instanceof Error ? error.message : String(error);
+      }
+    } 
+    
+    // Method 2: Use VM service URL if available and stdin failed
+    if (!reloadSuccess && app.vmServiceUrl) {
+      try {
+        logger.info(`Triggering hot reload via VM service for app ID ${appId}`);
+        
+        // First, get the list of isolates
+        const { exec } = require('child_process');
+        const util = require('util');
+        const execAsync = util.promisify(exec);
+        
+        const getVMInfoCmd = `curl -s "${app.vmServiceUrl}/vm"`;
+        const { stdout: vmInfo } = await execAsync(getVMInfoCmd);
+        
+        const vmData = JSON.parse(vmInfo);
+        if (!vmData.isolates || vmData.isolates.length === 0) {
+          throw new Error('No isolates found in VM');
+        }
+        
+        // Get the first isolate ID
+        const isolateId = vmData.isolates[0].id;
+        logger.info(`Found isolate ID: ${isolateId}`);
+        
+        // Now trigger hot reload using the Flutter service protocol
+        const hotReloadCmd = `curl -s -X POST "${app.vmServiceUrl}/_flutter/reload?isolateId=${isolateId}&pause=false&reason=manual"`;
+        logger.info(`Executing hot reload command: ${hotReloadCmd}`);
+        
+        const { stdout: reloadResult } = await execAsync(hotReloadCmd);
+        
+        // Check if reload was successful
+        const reloadData = JSON.parse(reloadResult);
+        if (reloadData.success === true) {
+          // Add to logs
+          app.logs.push('[INFO] Hot reload triggered via VM service');
+          reloadSuccess = true;
+        } else {
+          throw new Error(reloadData.message || 'Unknown error from VM service');
+        }
+      } catch (error) {
+        logger.error(`Error triggering hot reload via VM service: ${error}`);
+        errorMessage = `${errorMessage}\nVM service error: ${error instanceof Error ? error.message : String(error)}`;
+        
+        // Try legacy approach as last resort
+        try {
+          logger.info('Trying legacy hot reload approach...');
+          const { exec } = require('child_process');
+          const util = require('util');
+          const execAsync = util.promisify(exec);
+          
+          const legacyReloadCmd = `curl -s -X POST "${app.vmServiceUrl}/hot-reload"`;
+          await execAsync(legacyReloadCmd);
+          
+          // Add to logs
+          app.logs.push('[INFO] Hot reload triggered via legacy VM service');
+          reloadSuccess = true;
+        } catch (legacyError) {
+          logger.error(`Legacy hot reload failed: ${legacyError}`);
+        }
+      }
+    }
+    
+    if (reloadSuccess) {
       return {
         content: [{
           type: "text" as const,
-          text: `Hot reload triggered for app ID ${appId}`
+          text: `Hot reload triggered for app ID ${appId}. Your changes should be visible in the app now.`
         }]
       };
     } else {
+      // If all methods failed
       return {
         content: [{
           type: "text" as const,
-          text: `Cannot trigger hot reload: process not available`
+          text: `Cannot trigger hot reload: process not available or VM service not accessible.\n${errorMessage}\n\nTry manually pressing 'r' in the Flutter console or restarting the app.`
         }]
       };
     }
