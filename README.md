@@ -16,6 +16,34 @@ The project consists of two main components:
 
 These components work together to provide a seamless experience for debugging, testing, and analyzing Flutter applications.
 
+### Communication Flow
+
+```
+┌──────────────────┐          ┌───────────────────┐          ┌─────────────────┐
+│                  │          │                   │          │                 │
+│  AI Assistant    │◄─────────┤   MCP Server      │◄─────────┤ Flutter         │
+│  (Claude, etc.)  │  MCP     │   (Tool Provider) │   REST   │ Connector       │
+│                  ├─────────►│                   ├─────────►│ Server          │
+└──────────────────┘          └───────────────────┘          └────────┬────────┘
+                                                                      │
+                                                                      │ VM Service
+                                                                      │ Protocol
+                                                                      ▼
+                                                             ┌─────────────────┐
+                                                             │                 │
+                                                             │ Flutter Apps    │
+                                                             │ (Debugging Mode)│
+                                                             │                 │
+                                                             └─────────────────┘
+```
+
+The system works as follows:
+
+1. **Flutter Connector Server** discovers and connects to Flutter apps in debug mode via the VM Service Protocol
+2. **MCP Server** communicates with the Flutter Connector Server via REST API calls
+3. **AI Assistants** (like Claude) use the tools provided by the MCP Server through the Model Context Protocol
+4. This layered approach allows AI tools to analyze, debug, and optimize Flutter applications seamlessly
+
 ## Features
 
 - **Application Management**
@@ -52,7 +80,7 @@ These components work together to provide a seamless experience for debugging, t
 
 ### Prerequisites
 
-- Node.js (v14 or later)
+- Node.js (v18 or later)
 - Flutter SDK
 - Android SDK (for Android development)
 - Xcode (for iOS development, macOS only)
@@ -82,25 +110,104 @@ These components work together to provide a seamless experience for debugging, t
 
 ### Running the Servers
 
-You can run both servers simultaneously using the provided script:
+You need to run both the Flutter Connector Server and the MCP Server:
 
-```bash
-node start-servers.js
-```
+1. **Start the Flutter Connector Server**:
+   ```bash
+   cd flutter-connector-server
+   npm start
+   ```
+   This will start the connector server on port 5051 by default.
 
-Or run them separately:
+2. **Start the MCP Server** (in a new terminal):
+   ```bash
+   cd mcp
+   npm start
+   ```
+   This will start the MCP server running on stdio, ready to connect to MCP clients.
 
-```bash
-# Run MCP Server
-cd mcp
-npm start
+### Using with Claude for Desktop
 
-# Run Flutter Connector Server (in another terminal)
-cd flutter-connector-server
-npm start
-```
+To use the Flutter Tools MCP with Claude for Desktop:
 
-### Configuration
+1. Open the Claude for Desktop configuration file:
+   ```bash
+   # On macOS
+   nano ~/Library/Application\ Support/Claude/claude_desktop_config.json
+   
+   # On Windows
+   notepad %APPDATA%\Claude\claude_desktop_config.json
+   ```
+
+2. Add the configuration for the Flutter Tools MCP:
+   ```json
+   {
+     "mcpServers": {
+       "flutter-tools": {
+         "command": "node",
+         "args": [
+           "/ABSOLUTE/PATH/TO/flutter-tools-mcp/mcp/build/index.js"
+         ]
+       }
+     }
+   }
+   ```
+   Make sure to replace `/ABSOLUTE/PATH/TO` with the actual absolute path to your project directory.
+
+3. Save the file and restart Claude for Desktop.
+
+4. You should now see the Flutter tools icon in the Claude for Desktop interface, allowing you to use all the tools for Flutter app debugging and optimization.
+
+### Using with Cursor
+
+To integrate with Cursor:
+
+1. Ensure you have Cursor installed with MCP support
+2. Configure Cursor to use the Flutter Tools MCP:
+   - Open Cursor settings
+   - Navigate to the MCP section
+   - Add a new MCP server with the command:
+     ```
+     node /ABSOLUTE/PATH/TO/flutter-tools-mcp/mcp/build/index.js
+     ```
+3. Restart Cursor to apply the changes
+4. You can now use the Flutter tools within Cursor to analyze and debug your Flutter apps
+
+### Using with Other MCP Clients
+
+For other MCP-compatible clients:
+
+1. Build the MCP server:
+   ```bash
+   cd mcp
+   npm run build
+   ```
+
+2. Point your MCP client to the built executable:
+   ```
+   node /path/to/flutter-tools-mcp/mcp/build/index.js
+   ```
+
+3. Configure any client-specific settings according to the client's documentation
+
+### Debugging a Flutter App
+
+To debug a Flutter app:
+
+1. Start your Flutter app in debug mode:
+   ```bash
+   flutter run
+   ```
+
+2. The Flutter Connector Server will automatically detect your running app.
+
+3. Use the tools provided by the MCP server through your AI assistant (Claude, Cursor, etc.) with commands like:
+   - "List all running Flutter apps"
+   - "Show me the performance metrics for my Flutter app"
+   - "Take a screenshot of my Flutter app"
+   - "Show me the network requests my Flutter app is making"
+
+## Configuration
 
 Both servers can be configured using environment variables:
 
@@ -109,58 +216,38 @@ Both servers can be configured using environment variables:
   - `MCP_HOST`: Host to bind to (default: localhost)
 
 - **Flutter Connector Server**
-  - `FLUTTER_CONNECTOR_PORT`: Port to listen on (default: 3030)
+  - `FLUTTER_CONNECTOR_PORT`: Port to listen on (default: 5051)
   - `FLUTTER_CONNECTOR_HOST`: Host to bind to (default: localhost)
   - `FLUTTER_CONNECTOR_API_KEY`: API key for authentication (optional)
 
-## Usage
-
-### AI Assistant Tools
+## Available MCP Tools
 
 The MCP server provides the following tools for AI assistants:
 
-- `getRunningApps`: List all running Flutter apps
-- `getApp`: Get details about a specific app
-- `startApp`: Start a Flutter application
-- `stopApp`: Stop a running Flutter application
-- `getAppLogs`: Get logs from a running app
-- `hotReload`: Perform a hot reload on an app
-- `takeScreenshot`: Take a screenshot of an app
-- `getNetworkTraffic`: Monitor network requests
-- `getPerformanceMetrics`: Get performance data
-- `getDevices`: List connected devices
-- `getDebugInfo`: Get debug information and DevTools URL
-- `getSystemHealth`: Get system health status
-- `getAnalyticsInsights`: Get performance insights and recommendations
+| Tool Name | Description |
+|-----------|-------------|
+| `list-flutter-apps` | List all running Flutter applications |
+| `connect-to-app` | Connect to a specific Flutter app by ID |
+| `get-app-logs` | Retrieve logs from a connected Flutter app |
+| `get-performance-metrics` | Get performance metrics from a Flutter app |
+| `get-network-requests` | Fetch network request data from a Flutter app |
+| `take-screenshot` | Capture a screenshot of the Flutter app UI |
+| `get-widget-tree` | Retrieve the widget tree structure of a Flutter app |
+| `analyze-performance` | Run a performance analysis on the Flutter app |
 
-### Using the API Directly
+## API Reference
 
-Both servers provide RESTful APIs that can be accessed directly:
-
-#### MCP Server API
-
-```
-GET /api/mcp/tools - List available tools
-POST /api/mcp/runTool - Run a tool
-```
-
-#### Flutter Connector Server API
+### Flutter Connector Server API
 
 ```
 GET /api/apps - List running apps
-POST /api/apps/start - Start a new app
 GET /api/apps/{appId} - Get app details
-POST /api/apps/{appId}/stop - Stop an app
 GET /api/apps/{appId}/logs - Get app logs
-POST /api/apps/{appId}/hot-reload - Perform hot reload
-GET /api/apps/{appId}/screenshot - Take screenshot
+GET /api/apps/{appId}/metrics - Get performance metrics
 GET /api/apps/{appId}/network - Get network traffic
-GET /api/apps/{appId}/performance - Get performance metrics
-GET /api/apps/{appId}/debug - Get debug information
-GET /api/apps/{appId}/analytics - Get analytics insights
-GET /api/devices - List connected devices
-GET /api/health - Get system health
-GET /api/health/check - Quick health check
+GET /api/apps/{appId}/screenshot - Take screenshot
+GET /api/apps/{appId}/widget-tree - Get widget tree
+GET /api/health - Server health check
 ```
 
 ## Development
@@ -172,21 +259,20 @@ flutter-tools-mcp/
 ├── mcp/                  # MCP server
 │   ├── src/
 │   │   ├── tools/        # Tool implementations
-│   │   ├── utils/        # Utilities
+│   │   ├── services/     # Services (connector client, etc.)
+│   │   ├── types/        # TypeScript type definitions
 │   │   └── index.ts      # Main entry point
 │   └── package.json
 │
 ├── flutter-connector-server/  # Flutter Connector Server
 │   ├── src/
-│   │   ├── app-manager.ts     # App management
-│   │   ├── device-manager.ts  # Device management
-│   │   ├── server.ts          # Server implementation
-│   │   ├── devtools-integration.ts # DevTools integration
-│   │   ├── analytics-service.ts   # Analytics service
-│   │   └── reliability/       # Self-healing components
+│   │   ├── services/          # Core services
+│   │   ├── controllers/       # API controllers
+│   │   ├── utils/             # Utility functions
+│   │   └── server.ts          # Server implementation
 │   └── package.json
 │
-└── start-servers.js      # Script to start both servers
+└── README.md             # This documentation file
 ```
 
 ### Running in Development Mode
