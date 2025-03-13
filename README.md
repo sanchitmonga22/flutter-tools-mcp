@@ -1,197 +1,218 @@
 # Flutter Tools MCP
 
-> AI-powered Flutter development tools using Anthropic's Model Context Protocol (MCP)
+A comprehensive toolset for Flutter development with AI assistant integration through the Model Context Protocol.
 
-Flutter Tools MCP enables AI assistants to interact with Flutter applications, providing debugging, monitoring, and analysis capabilities through the Model Context Protocol. This tool bridges the gap between AI assistants and Flutter app development, making your development workflow more efficient.
+## Overview
 
-## 🎯 Key Features
+This project provides a powerful platform for interacting with Flutter applications programmatically, enabling AI assistants and development tools to inspect, control, and optimize Flutter apps. The system follows a two-component architecture that provides scalability and robustness.
 
-- **Cross-Platform Support**: Work with Flutter apps on iOS, Android, and web platforms
-- **App Management**: Start, stop, and manage Flutter applications remotely
-- **Real-time Monitoring**:
-  - Capture and analyze detailed app logs
-  - Monitor network requests and responses
-  - Track performance metrics
-- **Interactive Debugging**:
-  - Take screenshots of running apps
-  - Trigger hot reload for instant code changes
-  - Get real-time debugging feedback
+## Architecture
 
-## 📱 Platform Support
+The project consists of two main components:
 
-Based on the implementation in the codebase, Flutter Tools MCP supports:
+1. **Flutter Connector Server**: A standalone server that monitors Flutter applications, providing direct access to their state, logs, performance metrics, and more.
 
-| Platform | Device Type | Status | Features |
-|----------|-------------|--------|----------|
-| Android | Emulators | ✅ Full support | Screenshots, logs, network monitoring |
-| Android | Physical devices | ✅ Full support | Screenshots, logs, network monitoring |
-| iOS | Simulators | ✅ Full support | Screenshots, logs, network monitoring |
-| iOS | Physical devices | ⚠️ Requires macOS & Xcode | Screenshots, logs, network monitoring |
-| Web | Browsers | 🚧 Basic support | Logs, network monitoring |
+2. **MCP Server**: A Model Context Protocol server that provides AI assistants with tools to interact with Flutter applications through a standardized interface.
 
-## 🚀 Quick Start
+These components work together to provide a seamless experience for debugging, testing, and analyzing Flutter applications.
+
+## Features
+
+- **Application Management**
+  - Start/stop Flutter applications
+  - List running applications
+  - Hot reload apps
+  - Monitor app logs
+
+- **Device Management**
+  - Discover connected devices (Android/iOS/simulators/emulators)
+  - Get device information
+  - Select the best device based on priority rules
+
+- **Debugging Capabilities**
+  - Take screenshots
+  - Monitor network traffic
+  - Collect performance metrics
+  - Launch Flutter DevTools
+  - Get widget hierarchies
+
+- **Analytics and Insights**
+  - Collect time-series performance data
+  - Analyze trends
+  - Detect anomalies
+  - Generate optimization recommendations
+
+- **Reliability**
+  - Process monitoring
+  - Automatic recovery
+  - Self-healing mechanisms
+  - Resource usage optimization
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js (v14 or later)
+- Flutter SDK
+- Android SDK (for Android development)
+- Xcode (for iOS development, macOS only)
 
 ### Installation
 
-```bash
-# Install globally with npm
-npm install -g @flutter-tools/mcp
-
-# Or run directly with npx
-npx @flutter-tools/mcp
-```
-
-## 🛠️ Development Setup
-
-### Cloning and Running Locally
-
-If you want to run the Flutter Tools MCP from source or contribute to its development, follow these steps:
-
-```bash
-# Clone the repository
-git clone https://github.com/flutter-tools/mcp.git
-cd flutter-tools-mcp
-
-# Install dependencies
-npm install
-
-# Build the project
-npm run build
-
-# Run the MCP server
-node build/index.js
-```
-
-### Connecting to Cursor with Local Build
-
-To connect your locally built Flutter Tools MCP to Cursor:
-
-1. Open Cursor IDE and go to Settings (⚙️)
-2. Navigate to the "MCP" section in the sidebar
-3. Click on "Add new MCP server"
-4. Configure the server with the following information:
-   - **Name**: Flutter Tools Local (or any name you prefer)
-   - **Command**: `node /path/to/your/clone/flutter-tools-mcp/build/index.js`
-   - Replace `/path/to/your/clone` with the actual path where you cloned the repository
-
-5. Click "Add" to save the server configuration
-6. The Flutter tools will now be available to use in your AI conversations
-
-### Troubleshooting Connection Issues
-
-If you encounter "Client closed" or "No tools available" issues:
-
-1. **Verify Build**: Ensure the project is built correctly with `npm run build`
-2. **Check Permissions**: Make sure `build/index.js` has execute permissions (`chmod +x build/index.js`)
-3. **Restart Cursor**: After adding the MCP server, restart Cursor to ensure changes take effect
-4. **Use Absolute Path**: Use the full absolute path to the `build/index.js` file in the command
-5. **Check Requirements**: Ensure Flutter SDK is installed and available in your PATH
-
-## 🔌 Connecting with MCP Clients
-
-### Cursor IDE
-
-To connect Flutter Tools MCP to Cursor IDE:
-
-1. Open Cursor IDE and go to Settings (⚙️)
-2. Navigate to the "MCP" section in the sidebar
-3. Click on "Add new MCP server"
-4. Configure the server with the following information:
-   - **Name**: Flutter Tools (or any name you prefer)
-   - **Command**: `npx @flutter-tools/mcp`
-
-   ![Cursor MCP Setup](https://raw.githubusercontent.com/flutter-tools/mcp/main/docs/images/cursor-setup.png)
-
-5. Click "Add" to save the server configuration
-6. The Flutter tools will now be available to use in your AI conversations
-
-### Claude Desktop
-
-To connect Flutter Tools MCP to Claude Desktop:
-
-1. Open Claude Desktop
-2. Click on settings (gear icon)
-3. Navigate to "MCP Servers"
-4. Add a new server with:
-   ```json
-   {
-     "mcpServers": {
-       "flutter": {
-         "command": "npx @flutter-tools/mcp"
-       }
-     }
-   }
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/flutter-tools-mcp.git
+   cd flutter-tools-mcp
    ```
-5. Restart Claude Desktop
 
-### Other MCP Clients
+2. Install dependencies for both components:
+   ```bash
+   # Install MCP server dependencies
+   cd mcp
+   npm install
+   npm run build
+   cd ..
 
-For other MCP-compatible clients, consult their documentation for adding custom MCP servers, and use `npx @flutter-tools/mcp` as the command to run the Flutter Tools MCP server.
+   # Install Flutter Connector Server dependencies
+   cd flutter-connector-server
+   npm install
+   npm run build
+   cd ..
+   ```
 
-### Using with MCP-compatible Clients
+### Running the Servers
 
-Flutter Tools MCP is designed to be used with any MCP-compatible client like:
+You can run both servers simultaneously using the provided script:
 
-- Cursor IDE
-- Claude Desktop
-- Zed Editor
-- Cline
-
-### Example Commands
-
-Here are some examples of how to use Flutter Tools MCP with a compatible MCP client:
-
-```
-# Starting a Flutter app
-startApp --projectPath="/path/to/flutter/project"
-
-# Taking a screenshot of a running app
-takeScreenshot --appId="your-app-id"
-
-# Getting logs from a running app
-getLogs --appId="your-app-id" --limit=100
+```bash
+node start-servers.js
 ```
 
-## 🏗️ Architecture
+Or run them separately:
 
-The Flutter Tools MCP system consists of these key components:
+```bash
+# Run MCP Server
+cd mcp
+npm start
+
+# Run Flutter Connector Server (in another terminal)
+cd flutter-connector-server
+npm start
+```
+
+### Configuration
+
+Both servers can be configured using environment variables:
+
+- **MCP Server**
+  - `MCP_PORT`: Port to listen on (default: 3000)
+  - `MCP_HOST`: Host to bind to (default: localhost)
+
+- **Flutter Connector Server**
+  - `FLUTTER_CONNECTOR_PORT`: Port to listen on (default: 3030)
+  - `FLUTTER_CONNECTOR_HOST`: Host to bind to (default: localhost)
+  - `FLUTTER_CONNECTOR_API_KEY`: API key for authentication (optional)
+
+## Usage
+
+### AI Assistant Tools
+
+The MCP server provides the following tools for AI assistants:
+
+- `getRunningApps`: List all running Flutter apps
+- `getApp`: Get details about a specific app
+- `startApp`: Start a Flutter application
+- `stopApp`: Stop a running Flutter application
+- `getAppLogs`: Get logs from a running app
+- `hotReload`: Perform a hot reload on an app
+- `takeScreenshot`: Take a screenshot of an app
+- `getNetworkTraffic`: Monitor network requests
+- `getPerformanceMetrics`: Get performance data
+- `getDevices`: List connected devices
+- `getDebugInfo`: Get debug information and DevTools URL
+- `getSystemHealth`: Get system health status
+- `getAnalyticsInsights`: Get performance insights and recommendations
+
+### Using the API Directly
+
+Both servers provide RESTful APIs that can be accessed directly:
+
+#### MCP Server API
 
 ```
-┌─────────────┐     ┌──────────────┐     ┌─────────────┐
-│  MCP Client │ ──► │ Flutter Tools│ ──► │   Flutter   │
-│  (e.g.      │ ◄── │ MCP Server   │ ◄── │   Process   │
-│   Cursor)   │     │              │     │             │
-└─────────────┘     └──────────────┘     └─────────────┘
+GET /api/mcp/tools - List available tools
+POST /api/mcp/runTool - Run a tool
 ```
 
-1. **MCP Client**: AI-powered tool like Cursor IDE that initiates requests
-2. **Flutter Tools MCP Server**: Middleware that interprets requests and controls Flutter processes
-3. **Flutter Process**: Actual Flutter app instance that runs on a device or emulator
+#### Flutter Connector Server API
 
-## 🔧 Available Tools
+```
+GET /api/apps - List running apps
+POST /api/apps/start - Start a new app
+GET /api/apps/{appId} - Get app details
+POST /api/apps/{appId}/stop - Stop an app
+GET /api/apps/{appId}/logs - Get app logs
+POST /api/apps/{appId}/hot-reload - Perform hot reload
+GET /api/apps/{appId}/screenshot - Take screenshot
+GET /api/apps/{appId}/network - Get network traffic
+GET /api/apps/{appId}/performance - Get performance metrics
+GET /api/apps/{appId}/debug - Get debug information
+GET /api/apps/{appId}/analytics - Get analytics insights
+GET /api/devices - List connected devices
+GET /api/health - Get system health
+GET /api/health/check - Quick health check
+```
 
-| Tool | Description | Parameters |
-|------|-------------|------------|
-| `startApp` | Start a Flutter app | `projectPath`, `deviceId` (optional) |
-| `stopApp` | Stop a running app | `appId` |
-| `getLogs` | Get logs from app | `appId`, `limit` (optional), `filter` (optional) |
-| `takeScreenshot` | Capture screen | `appId` |
-| `getNetworkData` | Get network requests | `appId`, `limit` (optional) |
-| `getPerformanceData` | Get performance metrics | `appId` |
-| `hotReload` | Trigger hot reload | `appId` |
-| `listRunningApps` | List all running apps | None |
+## Development
 
-## 📦 Requirements
+### Project Structure
 
-- Node.js 18 or higher
-- Flutter SDK installed and available in PATH
-- For Android: ADB installed and available in PATH
-- For iOS: macOS with Xcode and iOS Simulator
+```
+flutter-tools-mcp/
+├── mcp/                  # MCP server
+│   ├── src/
+│   │   ├── tools/        # Tool implementations
+│   │   ├── utils/        # Utilities
+│   │   └── index.ts      # Main entry point
+│   └── package.json
+│
+├── flutter-connector-server/  # Flutter Connector Server
+│   ├── src/
+│   │   ├── app-manager.ts     # App management
+│   │   ├── device-manager.ts  # Device management
+│   │   ├── server.ts          # Server implementation
+│   │   ├── devtools-integration.ts # DevTools integration
+│   │   ├── analytics-service.ts   # Analytics service
+│   │   └── reliability/       # Self-healing components
+│   └── package.json
+│
+└── start-servers.js      # Script to start both servers
+```
 
-## 🤝 Contributing
+### Running in Development Mode
 
-Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md) before submitting PRs.
+To run the servers with auto-reloading during development:
 
-## 📄 License
+```bash
+# MCP Server
+cd mcp
+npm run dev
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details. 
+# Flutter Connector Server
+cd flutter-connector-server
+npm run dev
+```
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit pull requests.
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details. 

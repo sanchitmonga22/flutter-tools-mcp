@@ -565,7 +565,4 @@ export async function getDeviceLogs(deviceId: string, limit: number = 100): Prom
   }
   
   return [];
-}
-
-// Export types
-export { Device }; 
+} 

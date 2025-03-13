@@ -2,153 +2,176 @@
  * Flutter DevTools Integration
  * 
  * This module provides integration with Flutter DevTools for advanced debugging capabilities:
- * - Launching DevTools for a specific app
- * - Extracting debugging information from DevTools
- * - Controlling DevTools features remotely
+ * - Launch DevTools for specific apps
+ * - Extract debugging information from DevTools
+ * - Control DevTools features remotely
+ * - Support for complex debugging scenarios
  */
 
-import { exec } from 'child_process';
+import { spawn, ChildProcess } from 'child_process';
 import { promisify } from 'util';
 import axios from 'axios';
+import * as net from 'net';
 import { logger } from './utils/logger.js';
-import { FlutterApp } from './app-manager.js';
 
-// Promisify exec
-const execAsync = promisify(exec);
+// Promisify necessary functions
+const sleep = promisify(setTimeout);
 
-// Track active DevTools instances
-const activeDevToolsInstances: Map<string, DevToolsInstance> = new Map();
-
-// DevTools instance information
+// Interface for DevTools instance tracking
 interface DevToolsInstance {
   appId: string;
   url: string;
   port: number;
-  process: any; // ChildProcess
+  process: ChildProcess;
   startTime: number;
 }
 
+// Track active DevTools instances
+const activeDevToolsInstances: Map<string, DevToolsInstance> = new Map();
+
+// Port range for DevTools instances
+const PORT_RANGE_START = 9100;
+const PORT_RANGE_END = 9200;
+
 /**
  * Launch DevTools for a specific Flutter app
+ * @param appId The ID of the Flutter app
+ * @returns The URL of the DevTools instance
  */
-export async function launchDevTools(app: FlutterApp): Promise<DevToolsInstance | null> {
+export async function launchDevTools(appId: string): Promise<string> {
+  logger.info(`Launching DevTools for app: ${appId}`);
+  
+  // Check if DevTools is already running for this app
+  const existingInstance = activeDevToolsInstances.get(appId);
+  if (existingInstance) {
+    logger.info(`DevTools already running for app ${appId} at ${existingInstance.url}`);
+    return existingInstance.url;
+  }
+  
+  // Get the app to ensure it exists and has a VM service URL
+  const app = getApp(appId);
+  if (!app) {
+    throw new Error(`App ${appId} not found`);
+  }
+  
+  if (!app.vmServiceUrl) {
+    throw new Error(`App ${appId} does not have a VM service URL`);
+  }
+  
   try {
-    logger.info(`Launching DevTools for app ${app.id}`);
+    // Find an available port
+    const port = await findAvailablePort(PORT_RANGE_START, PORT_RANGE_END);
     
-    // Check if DevTools is already running for this app
-    if (activeDevToolsInstances.has(app.id)) {
-      logger.info(`DevTools already running for app ${app.id}`);
-      return activeDevToolsInstances.get(app.id) || null;
-    }
-    
-    // Check if we have VM service URL
-    if (!app.vmServiceUrl) {
-      logger.error(`Cannot launch DevTools: No VM service URL for app ${app.id}`);
-      return null;
-    }
-    
-    // Find a free port for DevTools
-    const port = await findAvailablePort(9100, 9200);
-    
-    // Launch DevTools using dart pub
-    const devToolsProcess = exec(
-      `dart pub global run devtools --headless --machine --port ${port} --vm-uri ${app.vmServiceUrl}`,
-      { maxBuffer: 1024 * 1024 } // 1 MB buffer
-    );
-    
-    // Wait for DevTools to start (look for the URL in stdout)
-    let devToolsUrl = '';
-    
-    const devToolsStartPromise = new Promise<string>((resolve, reject) => {
-      let output = '';
-      
-      // Set timeout to prevent hanging
-      const timeout = setTimeout(() => {
-        reject(new Error('Timeout waiting for DevTools to start'));
-      }, 30000);
-      
-      devToolsProcess.stdout?.on('data', (data) => {
-        output += data.toString();
-        
-        // Look for DevTools server URL
-        const match = output.match(/Serving DevTools at (http:\/\/[^\s]+)/);
-        if (match && match[1]) {
-          devToolsUrl = match[1];
-          clearTimeout(timeout);
-          resolve(devToolsUrl);
-        }
-      });
-      
-      devToolsProcess.stderr?.on('data', (data) => {
-        logger.error(`DevTools stderr: ${data}`);
-      });
-      
-      devToolsProcess.on('error', (err) => {
-        clearTimeout(timeout);
-        reject(err);
-      });
-      
-      devToolsProcess.on('exit', (code) => {
-        if (!devToolsUrl) {
-          clearTimeout(timeout);
-          reject(new Error(`DevTools process exited with code ${code}`));
-        }
-      });
+    // Launch the DevTools process
+    const devToolsProc = spawn('dart', [
+      'devtools',
+      '--machine',
+      '--port', port.toString(),
+      '--vm-uri', app.vmServiceUrl
+    ], {
+      stdio: ['ignore', 'pipe', 'pipe']
     });
     
-    // Wait for DevTools to start
-    devToolsUrl = await devToolsStartPromise;
+    // Wait for DevTools to start and capture URL
+    let devToolsUrl = '';
     
-    // Store the DevTools instance
+    // Set up listener for stdout
+    devToolsProc.stdout.on('data', (data: Buffer) => {
+      const output = data.toString();
+      logger.debug(`DevTools stdout: ${output}`);
+      
+      // DevTools outputs JSON when started with --machine
+      try {
+        const jsonMatch = output.match(/\{.*\}/s);
+        if (jsonMatch) {
+          const json = JSON.parse(jsonMatch[0]);
+          if (json.event === 'server.started' && json.params && json.params.uri) {
+            devToolsUrl = json.params.uri;
+            logger.info(`DevTools started at ${devToolsUrl}`);
+          }
+        }
+      } catch (e) {
+        // Not valid JSON, ignore
+      }
+    });
+    
+    // Handle errors
+    devToolsProc.stderr.on('data', (data: Buffer) => {
+      logger.error(`DevTools stderr: ${data.toString()}`);
+    });
+    
+    // Handle process exit
+    devToolsProc.on('exit', (code: number | null) => {
+      logger.info(`DevTools process exited with code ${code}`);
+      // Remove from active instances
+      activeDevToolsInstances.delete(appId);
+    });
+    
+    // Wait for DevTools to start (timeout after 30 seconds)
+    let attempts = 0;
+    const maxAttempts = 30;
+    while (!devToolsUrl && attempts < maxAttempts && devToolsProc.exitCode === null) {
+      await sleep(1000);
+      attempts++;
+    }
+    
+    if (!devToolsUrl) {
+      // If process is still running but we didn't get a URL, kill it
+      if (devToolsProc.exitCode === null) {
+        devToolsProc.kill();
+      }
+      throw new Error(`Failed to start DevTools for app ${appId} after ${maxAttempts} seconds`);
+    }
+    
+    // Store the instance information
     const instance: DevToolsInstance = {
-      appId: app.id,
+      appId,
       url: devToolsUrl,
       port,
-      process: devToolsProcess,
-      startTime: Date.now(),
+      process: devToolsProc,
+      startTime: Date.now()
     };
     
-    activeDevToolsInstances.set(app.id, instance);
+    activeDevToolsInstances.set(appId, instance);
     
-    logger.info(`DevTools launched successfully for app ${app.id} at ${devToolsUrl}`);
-    
-    return instance;
+    return devToolsUrl;
   } catch (error) {
-    logger.error(`Error launching DevTools: ${error instanceof Error ? error.message : String(error)}`);
-    return null;
+    logger.error(`Error launching DevTools for app ${appId}:`, error);
+    throw new Error(`Failed to launch DevTools: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
 /**
- * Stop DevTools for a specific Flutter app
+ * Stop the DevTools instance for a specific app
+ * @param appId The ID of the Flutter app
+ * @returns True if DevTools was stopped, false if it wasn't running
  */
-export async function stopDevTools(appId: string): Promise<boolean> {
+export function stopDevTools(appId: string): boolean {
   const instance = activeDevToolsInstances.get(appId);
-  
   if (!instance) {
-    logger.warn(`No DevTools instance found for app ${appId}`);
     return false;
   }
   
+  logger.info(`Stopping DevTools for app ${appId}`);
+  
   try {
-    // Kill the DevTools process
-    if (instance.process) {
-      instance.process.kill();
-    }
+    // Kill the process
+    instance.process.kill();
     
     // Remove from active instances
     activeDevToolsInstances.delete(appId);
     
-    logger.info(`DevTools stopped for app ${appId}`);
     return true;
   } catch (error) {
-    logger.error(`Error stopping DevTools for app ${appId}: ${error instanceof Error ? error.message : String(error)}`);
+    logger.error(`Error stopping DevTools for app ${appId}:`, error);
     return false;
   }
 }
 
 /**
- * Get DevTools URL for a specific Flutter app
+ * Get the DevTools URL for a specific app
+ * @param appId The ID of the Flutter app
+ * @returns The URL of the DevTools instance or null if not running
  */
 export function getDevToolsUrl(appId: string): string | null {
   const instance = activeDevToolsInstances.get(appId);
@@ -156,165 +179,170 @@ export function getDevToolsUrl(appId: string): string | null {
 }
 
 /**
- * Get memory profiling data from DevTools
+ * Get memory profile from DevTools
+ * @param appId The ID of the Flutter app
+ * @returns Memory profile data
  */
-export async function getMemoryProfile(appId: string): Promise<any | null> {
-  const devToolsUrl = getDevToolsUrl(appId);
-  
-  if (!devToolsUrl) {
-    logger.error(`No DevTools instance found for app ${appId}`);
-    return null;
-  }
+export async function getMemoryProfile(appId: string): Promise<any> {
+  const devToolsUrl = await ensureDevToolsRunning(appId);
   
   try {
-    // DevTools memory profile API endpoint
-    const memoryApiUrl = `${devToolsUrl}/api/memoryProfile`;
+    // Extract base URL and append memory endpoint
+    const baseUrl = new URL(devToolsUrl);
+    const apiUrl = `${baseUrl.protocol}//${baseUrl.host}/api/getMemoryStats`;
     
-    // Request memory profile data
-    const response = await axios.get(memoryApiUrl);
-    
+    const response = await axios.get(apiUrl);
     return response.data;
   } catch (error) {
-    logger.error(`Error getting memory profile: ${error instanceof Error ? error.message : String(error)}`);
-    return null;
+    logger.error(`Error getting memory profile for app ${appId}:`, error);
+    throw new Error(`Failed to get memory profile: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
 /**
- * Get CPU profiling data from DevTools
+ * Get CPU profile from DevTools
+ * @param appId The ID of the Flutter app
+ * @param duration Duration in seconds to profile
+ * @returns CPU profile data
  */
-export async function getCpuProfile(appId: string, durationMs: number = 5000): Promise<any | null> {
-  const devToolsUrl = getDevToolsUrl(appId);
-  
-  if (!devToolsUrl) {
-    logger.error(`No DevTools instance found for app ${appId}`);
-    return null;
-  }
+export async function getCpuProfile(appId: string, duration: number = 5): Promise<any> {
+  const devToolsUrl = await ensureDevToolsRunning(appId);
   
   try {
-    // DevTools CPU profile API endpoint
-    const cpuApiUrl = `${devToolsUrl}/api/cpuProfile?duration=${durationMs}`;
+    // Extract base URL and append CPU profile endpoint
+    const baseUrl = new URL(devToolsUrl);
     
-    // Request CPU profile data
-    const response = await axios.get(cpuApiUrl);
+    // Start profiling
+    const startUrl = `${baseUrl.protocol}//${baseUrl.host}/api/startCpuProfiler`;
+    await axios.post(startUrl);
+    
+    // Wait for the specified duration
+    await sleep(duration * 1000);
+    
+    // Stop profiling and get results
+    const stopUrl = `${baseUrl.protocol}//${baseUrl.host}/api/stopCpuProfiler`;
+    const response = await axios.post(stopUrl);
     
     return response.data;
   } catch (error) {
-    logger.error(`Error getting CPU profile: ${error instanceof Error ? error.message : String(error)}`);
-    return null;
+    logger.error(`Error getting CPU profile for app ${appId}:`, error);
+    throw new Error(`Failed to get CPU profile: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
 /**
- * Get widget hierarchy from DevTools
+ * Get the widget hierarchy from DevTools
+ * @param appId The ID of the Flutter app
+ * @returns Widget hierarchy data
  */
-export async function getWidgetHierarchy(appId: string): Promise<any | null> {
-  const devToolsUrl = getDevToolsUrl(appId);
-  
-  if (!devToolsUrl) {
-    logger.error(`No DevTools instance found for app ${appId}`);
-    return null;
-  }
+export async function getWidgetHierarchy(appId: string): Promise<any> {
+  const devToolsUrl = await ensureDevToolsRunning(appId);
   
   try {
-    // DevTools widget hierarchy API endpoint
-    const widgetApiUrl = `${devToolsUrl}/api/widget-hierarchy`;
+    // Extract base URL and append widget hierarchy endpoint
+    const baseUrl = new URL(devToolsUrl);
+    const apiUrl = `${baseUrl.protocol}//${baseUrl.host}/api/getWidgetTree`;
     
-    // Request widget hierarchy data
-    const response = await axios.get(widgetApiUrl);
-    
+    const response = await axios.get(apiUrl);
     return response.data;
   } catch (error) {
-    logger.error(`Error getting widget hierarchy: ${error instanceof Error ? error.message : String(error)}`);
-    return null;
+    logger.error(`Error getting widget hierarchy for app ${appId}:`, error);
+    throw new Error(`Failed to get widget hierarchy: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
 /**
- * Get network traffic data from DevTools
+ * Get network traffic from DevTools
+ * @param appId The ID of the Flutter app
+ * @returns Network traffic data
  */
-export async function getNetworkTraffic(appId: string): Promise<any | null> {
-  const devToolsUrl = getDevToolsUrl(appId);
-  
-  if (!devToolsUrl) {
-    logger.error(`No DevTools instance found for app ${appId}`);
-    return null;
-  }
+export async function getNetworkTraffic(appId: string): Promise<any> {
+  const devToolsUrl = await ensureDevToolsRunning(appId);
   
   try {
-    // DevTools network traffic API endpoint
-    const networkApiUrl = `${devToolsUrl}/api/network`;
+    // Extract base URL and append network traffic endpoint
+    const baseUrl = new URL(devToolsUrl);
+    const apiUrl = `${baseUrl.protocol}//${baseUrl.host}/api/getNetworkTraffic`;
     
-    // Request network traffic data
-    const response = await axios.get(networkApiUrl);
-    
+    const response = await axios.get(apiUrl);
     return response.data;
   } catch (error) {
-    logger.error(`Error getting network traffic: ${error instanceof Error ? error.message : String(error)}`);
-    return null;
+    logger.error(`Error getting network traffic for app ${appId}:`, error);
+    throw new Error(`Failed to get network traffic: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
 /**
  * Get performance metrics from DevTools
+ * @param appId The ID of the Flutter app
+ * @returns Performance metrics data
  */
-export async function getPerformanceMetrics(appId: string): Promise<any | null> {
-  const devToolsUrl = getDevToolsUrl(appId);
-  
-  if (!devToolsUrl) {
-    logger.error(`No DevTools instance found for app ${appId}`);
-    return null;
-  }
+export async function getPerformanceMetrics(appId: string): Promise<any> {
+  const devToolsUrl = await ensureDevToolsRunning(appId);
   
   try {
-    // DevTools performance metrics API endpoint
-    const performanceApiUrl = `${devToolsUrl}/api/performance`;
+    // Extract base URL and append performance metrics endpoint
+    const baseUrl = new URL(devToolsUrl);
+    const apiUrl = `${baseUrl.protocol}//${baseUrl.host}/api/getPerformanceMetrics`;
     
-    // Request performance metrics data
-    const response = await axios.get(performanceApiUrl);
-    
+    const response = await axios.get(apiUrl);
     return response.data;
   } catch (error) {
-    logger.error(`Error getting performance metrics: ${error instanceof Error ? error.message : String(error)}`);
-    return null;
+    logger.error(`Error getting performance metrics for app ${appId}:`, error);
+    throw new Error(`Failed to get performance metrics: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
 /**
- * Find an available port in a range
+ * Ensure DevTools is running for a specific app
+ * @param appId The ID of the Flutter app
+ * @returns The URL of the DevTools instance
  */
-async function findAvailablePort(startPort: number, endPort: number): Promise<number> {
-  const net = require('net');
+async function ensureDevToolsRunning(appId: string): Promise<string> {
+  // Check if DevTools is already running
+  const existingUrl = getDevToolsUrl(appId);
+  if (existingUrl) {
+    return existingUrl;
+  }
   
-  for (let port = startPort; port <= endPort; port++) {
-    try {
-      // Check if port is in use
-      await new Promise<void>((resolve, reject) => {
-        const server = net.createServer();
-        
-        server.once('error', (err: any) => {
-          if (err.code === 'EADDRINUSE') {
-            // Port is in use
-            server.close();
-            resolve();
-          } else {
-            reject(err);
-          }
-        });
-        
-        server.once('listening', () => {
-          // Port is available
-          server.close();
-          reject(new Error('Port available'));
-        });
-        
-        server.listen(port);
-      });
-    } catch (error) {
-      // If we get here, the port is available
+  // Launch DevTools if not running
+  return await launchDevTools(appId);
+}
+
+/**
+ * Find an available port within a specified range
+ * @param start Start of port range
+ * @param end End of port range
+ * @returns An available port number
+ */
+async function findAvailablePort(start: number, end: number): Promise<number> {
+  for (let port = start; port <= end; port++) {
+    if (await isPortAvailable(port)) {
       return port;
     }
   }
   
-  throw new Error(`No available ports in range ${startPort}-${endPort}`);
+  throw new Error(`No available ports in range ${start}-${end}`);
+}
+
+/**
+ * Check if a port is available
+ * @param port Port number to check
+ * @returns True if the port is available, false otherwise
+ */
+async function isPortAvailable(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    
+    server.once('error', () => {
+      resolve(false);
+    });
+    
+    server.once('listening', () => {
+      server.close();
+      resolve(true);
+    });
+    
+    server.listen(port);
+  });
 } 

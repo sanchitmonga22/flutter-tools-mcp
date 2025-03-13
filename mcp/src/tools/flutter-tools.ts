@@ -1,577 +1,428 @@
 /**
- * Flutter tools implementation
+ * Flutter Tools for MCP
+ * 
+ * This module provides tools for interacting with Flutter applications through
+ * the Flutter Connector Server.
  */
 
-import { promises as fs } from 'fs';
-import { resolve } from 'path';
-import { z } from "zod";
+import axios from 'axios';
 import { logger } from '../utils/logger.js';
-// Replace direct imports with connector client
-import * as flutterConnector from './flutter-connector-client.js';
 
-// Import MAX_LOGS from app-manager
-// Since we can't directly import a constant from app-manager.ts, we'll define it here
-const MAX_LOGS = 1000;
+// Configuration for Flutter Connector Server
+const FLUTTER_CONNECTOR_URL = process.env.FLUTTER_CONNECTOR_URL || 'http://localhost:3030';
+let connectorInitialized = false;
+let connectorToken: string | null = null;
 
-// Define Zod schemas for each tool
-export const startAppSchema = {
-  projectPath: z.string().describe("Path to the Flutter project directory"),
-  deviceId: z.string().optional().default("default").describe("Device ID to run the app on (optional, default: 'default')"),
-};
+// API Key for authentication with the Flutter Connector Server
+const FLUTTER_CONNECTOR_API_KEY = process.env.FLUTTER_CONNECTOR_API_KEY || '';
 
-export const stopAppSchema = {
-  appId: z.string().describe("ID of the app to stop"),
-};
+/**
+ * Initialize the Flutter Connector client
+ */
+async function initializeConnector(): Promise<boolean> {
+  if (connectorInitialized) {
+    return true;
+  }
 
-export const getLogsSchema = {
-  appId: z.string().describe("ID of the app to get logs from"),
-  limit: z.number().optional().default(100).describe("Maximum number of log entries to return (default: 100)"),
-  filter: z.string().optional().describe("Filter logs containing this text (optional)"),
-};
+  try {
+    // Check if the connector is reachable
+    const healthResponse = await axios.get(`${FLUTTER_CONNECTOR_URL}/api/health/check`);
+    
+    if (healthResponse.status !== 200) {
+      logger.error('Flutter Connector Server is not available');
+      return false;
+    }
+    
+    // Authenticate if API key is provided
+    if (FLUTTER_CONNECTOR_API_KEY) {
+      try {
+        const authResponse = await axios.post(`${FLUTTER_CONNECTOR_URL}/api/login`, {}, {
+          headers: {
+            'x-api-key': FLUTTER_CONNECTOR_API_KEY
+          }
+        });
+        
+        if (authResponse.status === 200 && authResponse.data.token) {
+          connectorToken = authResponse.data.token;
+          logger.info('Successfully authenticated with Flutter Connector Server');
+        }
+      } catch (authError) {
+        logger.warn('Failed to authenticate with Flutter Connector Server', authError);
+        // Continue without authentication if it fails
+      }
+    }
+    
+    connectorInitialized = true;
+    logger.info('Flutter Connector Client initialized successfully');
+    return true;
+  } catch (error) {
+    logger.error('Failed to initialize Flutter Connector Client', error);
+    return false;
+  }
+}
 
-export const takeScreenshotSchema = {
-  appId: z.string().describe("ID of the app to screenshot"),
-};
+/**
+ * Get authorized headers for API requests
+ */
+function getHeaders() {
+  const headers: Record<string, string> = {};
+  
+  if (connectorToken) {
+    headers['Authorization'] = `Bearer ${connectorToken}`;
+  }
+  
+  return headers;
+}
 
-export const getNetworkDataSchema = {
-  appId: z.string().describe("ID of the app to get network data from"),
-  limit: z.number().optional().default(50).describe("Maximum number of network requests to return (default: 50)"),
-};
+/**
+ * Get a list of running Flutter apps
+ */
+export async function getRunningApps() {
+  try {
+    // Initialize connector if needed
+    if (!await initializeConnector()) {
+      return { error: 'Flutter Connector Server is not available' };
+    }
+    
+    // Get list of apps from the connector
+    const response = await axios.get(`${FLUTTER_CONNECTOR_URL}/api/apps`, {
+      headers: getHeaders()
+    });
+    
+    if (response.status === 200) {
+      return { apps: response.data };
+    } else {
+      return { error: 'Failed to get app list' };
+    }
+  } catch (error) {
+    logger.error('Error getting running apps:', error);
+    return { error: 'Failed to get app list' };
+  }
+}
 
-export const getPerformanceDataSchema = {
-  appId: z.string().describe("ID of the app to get performance data from"),
-};
-
-export const hotReloadSchema = {
-  appId: z.string().describe("ID of the app to hot reload"),
-};
-
-export const listRunningAppsSchema = {};
-
-// Tool execution functions - updated to use connector client
+/**
+ * Get a specific Flutter app by ID
+ */
+export async function getApp(appId: string) {
+  try {
+    // Initialize connector if needed
+    if (!await initializeConnector()) {
+      return { error: 'Flutter Connector Server is not available' };
+    }
+    
+    // Get app details from the connector
+    const response = await axios.get(`${FLUTTER_CONNECTOR_URL}/api/apps/${appId}`, {
+      headers: getHeaders()
+    });
+    
+    if (response.status === 200) {
+      return { app: response.data };
+    } else {
+      return { error: 'App not found' };
+    }
+  } catch (error) {
+    logger.error(`Error getting app ${appId}:`, error);
+    return { error: 'Failed to get app details' };
+  }
+}
 
 /**
  * Start a Flutter app
  */
-export async function startApp({ projectPath, deviceId }: { 
-  projectPath: string; 
-  deviceId?: string; 
-}) {
+export async function startApp(appPath: string, deviceId?: string) {
   try {
-    logger.info(`Starting Flutter app at ${projectPath}`);
-    
-    // Validate project path
-    const projectPathResolved = resolve(projectPath);
-    try {
-      const stats = await fs.stat(projectPathResolved);
-      if (!stats.isDirectory()) {
-        throw new Error('Project path is not a directory');
-      }
-      
-      // Check for pubspec.yaml to validate it's a Flutter project
-      const pubspecPath = resolve(projectPathResolved, 'pubspec.yaml');
-      await fs.access(pubspecPath);
-    } catch (error) {
-      return {
-        content: [{
-          type: "text" as const,
-          text: `Invalid Flutter project path: ${error instanceof Error ? error.message : String(error)}`
-        }]
-      };
+    // Initialize connector if needed
+    if (!await initializeConnector()) {
+      return { error: 'Flutter Connector Server is not available' };
     }
     
-    // Check if connector is available, otherwise fall back to local implementation
-    if (!flutterConnector.isConnectorAvailable()) {
-      logger.warn('Flutter Connector Server not available, using local implementation');
-      // Try to initialize the connector
-      const connected = await flutterConnector.initConnectorClient();
-      if (!connected) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: `Failed to connect to Flutter Connector Server. Please ensure it's running.`
-          }]
-        };
-      }
+    // Start app through the connector
+    const response = await axios.post(`${FLUTTER_CONNECTOR_URL}/api/apps/start`, {
+      appPath,
+      deviceId
+    }, {
+      headers: getHeaders()
+    });
+    
+    if (response.status === 200) {
+      return { app: response.data };
+    } else {
+      return { error: 'Failed to start app' };
     }
-    
-    // Start app using connector
-    const app = await flutterConnector.connectorStartApp(projectPathResolved, deviceId);
-    
-    if (!app) {
-      return {
-        content: [{
-          type: "text" as const,
-          text: `Failed to start Flutter app. Check the connector server logs for details.`
-        }]
-      };
-    }
-    
-    return {
-      content: [{
-        type: "text" as const,
-        text: `Flutter app started successfully!\nApp ID: ${app.id}\nVM Service URL: ${app.vmServiceUrl || 'Not available yet'}\nStatus: ${app.status}`
-      }]
-    };
   } catch (error) {
-    logger.error('Error starting Flutter app:', error);
-    return {
-      content: [{
-        type: "text" as const,
-        text: `Error starting Flutter app: ${error instanceof Error ? error.message : String(error)}`
-      }]
-    };
+    logger.error('Error starting app:', error);
+    return { error: 'Failed to start app' };
   }
 }
 
 /**
  * Stop a Flutter app
  */
-export async function stopApp({ appId }: { appId: string }) {
+export async function stopApp(appId: string) {
   try {
-    logger.info(`Stopping Flutter app with ID ${appId}`);
-    
-    // Check if connector is available
-    if (!flutterConnector.isConnectorAvailable()) {
-      logger.warn('Flutter Connector Server not available, using local implementation');
-      // Try to initialize the connector
-      const connected = await flutterConnector.initConnectorClient();
-      if (!connected) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: `Failed to connect to Flutter Connector Server. Please ensure it's running.`
-          }]
-        };
-      }
+    // Initialize connector if needed
+    if (!await initializeConnector()) {
+      return { error: 'Flutter Connector Server is not available' };
     }
     
-    // Stop app using connector
-    const success = await flutterConnector.connectorStopApp(appId);
+    // Stop app through the connector
+    const response = await axios.post(`${FLUTTER_CONNECTOR_URL}/api/apps/${appId}/stop`, {}, {
+      headers: getHeaders()
+    });
     
-    if (success) {
-      return {
-        content: [{
-          type: "text" as const,
-          text: `Successfully stopped Flutter app with ID: ${appId}`
-        }]
-      };
+    if (response.status === 200) {
+      return { success: true };
     } else {
-      return {
-        content: [{
-          type: "text" as const,
-          text: `Failed to stop Flutter app with ID: ${appId}. App may not be running or was already stopped.`
-        }]
-      };
+      return { error: 'Failed to stop app' };
     }
   } catch (error) {
-    logger.error('Error stopping Flutter app:', error);
-    return {
-      content: [{
-        type: "text" as const,
-        text: `Error stopping Flutter app: ${error instanceof Error ? error.message : String(error)}`
-      }]
-    };
+    logger.error(`Error stopping app ${appId}:`, error);
+    return { error: 'Failed to stop app' };
   }
 }
 
 /**
- * Get logs from a Flutter app
+ * Get logs for a Flutter app
  */
-export async function getLogs({ appId, limit = 100, filter }: { 
-  appId: string; 
-  limit?: number; 
-  filter?: string;
-}) {
+export async function getAppLogs(appId: string, limit?: number) {
   try {
-    logger.info(`Getting logs for Flutter app with ID ${appId}`);
-    
-    // Check if connector is available
-    if (!flutterConnector.isConnectorAvailable()) {
-      logger.warn('Flutter Connector Server not available, using local implementation');
-      // Try to initialize the connector
-      const connected = await flutterConnector.initConnectorClient();
-      if (!connected) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: `Failed to connect to Flutter Connector Server. Please ensure it's running.`
-          }]
-        };
-      }
+    // Initialize connector if needed
+    if (!await initializeConnector()) {
+      return { error: 'Flutter Connector Server is not available' };
     }
     
-    // Get app using connector
-    const app = await flutterConnector.connectorGetApp(appId);
+    // Get app logs from the connector
+    const response = await axios.get(`${FLUTTER_CONNECTOR_URL}/api/apps/${appId}/logs`, {
+      params: { limit },
+      headers: getHeaders()
+    });
     
-    if (!app) {
-      return {
-        content: [{
-          type: "text" as const,
-          text: `App with ID ${appId} not found`
-        }]
-      };
+    if (response.status === 200) {
+      return { logs: response.data };
+    } else {
+      return { error: 'Failed to get app logs' };
     }
-    
-    // Get logs using connector
-    const logs = await flutterConnector.connectorGetLogs(appId, limit, filter);
-    
-    // Check if we have meaningful logs
-    if (logs.length === 0) {
-      return {
-        content: [{
-          type: "text" as const,
-          text: `No logs available for app with ID ${appId}`
-        }]
-      };
-    }
-    
-    return {
-      content: [{
-        type: "text" as const,
-        text: `Logs for Flutter app with ID ${appId}:\n\n${logs.join('\n')}`
-      }]
-    };
   } catch (error) {
-    logger.error('Error getting logs:', error);
-    return {
-      content: [{
-        type: "text" as const,
-        text: `Error getting logs: ${error instanceof Error ? error.message : String(error)}`
-      }]
-    };
+    logger.error(`Error getting logs for app ${appId}:`, error);
+    return { error: 'Failed to get app logs' };
+  }
+}
+
+/**
+ * Perform a hot reload on a Flutter app
+ */
+export async function hotReload(appId: string) {
+  try {
+    // Initialize connector if needed
+    if (!await initializeConnector()) {
+      return { error: 'Flutter Connector Server is not available' };
+    }
+    
+    // Trigger hot reload through the connector
+    const response = await axios.post(`${FLUTTER_CONNECTOR_URL}/api/apps/${appId}/hot-reload`, {}, {
+      headers: getHeaders()
+    });
+    
+    if (response.status === 200) {
+      return { success: true };
+    } else {
+      return { error: 'Failed to hot reload app' };
+    }
+  } catch (error) {
+    logger.error(`Error hot reloading app ${appId}:`, error);
+    return { error: 'Failed to hot reload app' };
   }
 }
 
 /**
  * Take a screenshot of a Flutter app
  */
-export async function takeScreenshot({ appId }: { appId: string }) {
+export async function takeScreenshot(appId: string) {
   try {
-    logger.info(`Taking screenshot of Flutter app with ID ${appId}`);
-    
-    // Check if connector is available
-    if (!flutterConnector.isConnectorAvailable()) {
-      logger.warn('Flutter Connector Server not available, using local implementation');
-      // Try to initialize the connector
-      const connected = await flutterConnector.initConnectorClient();
-      if (!connected) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: `Failed to connect to Flutter Connector Server. Please ensure it's running.`
-          }]
-        };
-      }
+    // Initialize connector if needed
+    if (!await initializeConnector()) {
+      return { error: 'Flutter Connector Server is not available' };
     }
     
-    // Get app using connector
-    const app = await flutterConnector.connectorGetApp(appId);
+    // Get app to check if it exists
+    const appResponse = await axios.get(`${FLUTTER_CONNECTOR_URL}/api/apps/${appId}`, {
+      headers: getHeaders()
+    });
     
-    if (!app) {
-      return {
-        content: [{
-          type: "text" as const,
-          text: `App with ID ${appId} not found`
-        }]
-      };
+    if (appResponse.status !== 200) {
+      return { error: 'App not found' };
     }
     
-    // Take screenshot using connector
-    const screenshotBase64 = await flutterConnector.connectorTakeScreenshot(appId);
+    // Take screenshot through the connector
+    const response = await axios.get(`${FLUTTER_CONNECTOR_URL}/api/apps/${appId}/screenshot`, {
+      headers: getHeaders()
+    });
     
-    if (!screenshotBase64) {
-      return {
-        content: [{
-          type: "text" as const,
-          text: `Failed to take screenshot of Flutter app with ID ${appId}`
-        }]
-      };
+    if (response.status === 200 && response.data.base64) {
+      // Remove the base64 prefix if present and return just the data
+      const base64Data = response.data.base64.replace(/^data:image\/png;base64,/, '');
+      return { data: base64Data };
+    } else {
+      return { error: 'Failed to take screenshot' };
     }
-    
-    return {
-      content: [{
-        type: "text" as const,
-        text: `Screenshot taken successfully!`
-      }, {
-        type: "image" as const,
-        mimeType: "image/png",
-        data: screenshotBase64.replace(/^data:image\/png;base64,/, '')
-      }]
-    };
   } catch (error) {
-    logger.error('Error taking screenshot:', error);
-    return {
-      content: [{
-        type: "text" as const,
-        text: `Error taking screenshot: ${error instanceof Error ? error.message : String(error)}`
-      }]
-    };
+    logger.error(`Error taking screenshot for app ${appId}:`, error);
+    return { error: 'Failed to take screenshot' };
   }
 }
 
 /**
- * Get network data from a Flutter app
+ * Get network traffic for a Flutter app
  */
-export async function getNetworkData({ appId, limit = 50 }: { 
-  appId: string; 
-  limit?: number;
-}) {
+export async function getNetworkTraffic(appId: string) {
   try {
-    logger.info(`Getting network data for Flutter app with ID ${appId}`);
-    
-    // Check if connector is available
-    if (!flutterConnector.isConnectorAvailable()) {
-      logger.warn('Flutter Connector Server not available, using local implementation');
-      // Try to initialize the connector
-      const connected = await flutterConnector.initConnectorClient();
-      if (!connected) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: `Failed to connect to Flutter Connector Server. Please ensure it's running.`
-          }]
-        };
-      }
+    // Initialize connector if needed
+    if (!await initializeConnector()) {
+      return { error: 'Flutter Connector Server is not available' };
     }
     
-    // Get app using connector
-    const app = await flutterConnector.connectorGetApp(appId);
+    // Get network traffic from the connector
+    const response = await axios.get(`${FLUTTER_CONNECTOR_URL}/api/apps/${appId}/network`, {
+      headers: getHeaders()
+    });
     
-    if (!app) {
-      return {
-        content: [{
-          type: "text" as const,
-          text: `App with ID ${appId} not found`
-        }]
-      };
+    if (response.status === 200) {
+      return { traffic: response.data };
+    } else {
+      return { error: 'Failed to get network traffic' };
     }
-    
-    // Get network requests using connector
-    const networkRequests = await flutterConnector.connectorGetNetworkRequests(appId, limit);
-    
-    if (networkRequests.length === 0) {
-      return {
-        content: [{
-          type: "text" as const,
-          text: `No network requests captured for app with ID ${appId}`
-        }]
-      };
-    }
-    
-    // Format the network requests into a readable table
-    const formattedNetworkData = networkRequests.map(req => {
-      const status = req.status || 'Pending';
-      const duration = req.responseTime && req.requestTime 
-        ? `${Math.round((req.responseTime - req.requestTime) * 100) / 100}ms`
-        : 'Pending';
-      
-      return `${req.method} ${req.url} - Status: ${status}, Duration: ${duration}`;
-    }).join('\n');
-    
-    return {
-      content: [{
-        type: "text" as const,
-        text: `Network requests for Flutter app with ID ${appId}:\n\n${formattedNetworkData}`
-      }]
-    };
   } catch (error) {
-    logger.error('Error getting network data:', error);
-    return {
-      content: [{
-        type: "text" as const,
-        text: `Error getting network data: ${error instanceof Error ? error.message : String(error)}`
-      }]
-    };
+    logger.error(`Error getting network traffic for app ${appId}:`, error);
+    return { error: 'Failed to get network traffic' };
   }
 }
 
 /**
- * Get performance data from a Flutter app
+ * Get performance metrics for a Flutter app
  */
-export async function getPerformanceData({ appId }: { appId: string }) {
+export async function getPerformanceMetrics(appId: string) {
   try {
-    logger.info(`Getting performance data for Flutter app with ID ${appId}`);
-    
-    // Check if connector is available
-    if (!flutterConnector.isConnectorAvailable()) {
-      logger.warn('Flutter Connector Server not available, using local implementation');
-      // Try to initialize the connector
-      const connected = await flutterConnector.initConnectorClient();
-      if (!connected) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: `Failed to connect to Flutter Connector Server. Please ensure it's running.`
-          }]
-        };
-      }
+    // Initialize connector if needed
+    if (!await initializeConnector()) {
+      return { error: 'Flutter Connector Server is not available' };
     }
     
-    // Get app using connector
-    const app = await flutterConnector.connectorGetApp(appId);
+    // Get performance metrics from the connector
+    const response = await axios.get(`${FLUTTER_CONNECTOR_URL}/api/apps/${appId}/performance`, {
+      headers: getHeaders()
+    });
     
-    if (!app) {
-      return {
-        content: [{
-          type: "text" as const,
-          text: `App with ID ${appId} not found`
-        }]
-      };
+    if (response.status === 200) {
+      return { metrics: response.data };
+    } else {
+      return { error: 'Failed to get performance metrics' };
     }
-    
-    // Get performance data using connector
-    const performanceData = await flutterConnector.connectorGetPerformanceData(appId);
-    
-    if (!performanceData) {
-      return {
-        content: [{
-          type: "text" as const,
-          text: `No performance data available for app with ID ${appId}`
-        }]
-      };
-    }
-    
-    // Format the performance data
-    const formattedData = [
-      `CPU Usage: ${performanceData.cpuUsage !== undefined ? `${performanceData.cpuUsage.toFixed(2)}%` : 'Not available'}`,
-      `Memory Usage: ${performanceData.memoryUsage !== undefined ? `${(performanceData.memoryUsage / (1024 * 1024)).toFixed(2)} MB` : 'Not available'}`,
-      `Frame Rate: ${performanceData.frameRate !== undefined ? `${performanceData.frameRate.toFixed(2)} FPS` : 'Not available'}`,
-      `Last Updated: ${performanceData.lastUpdated ? new Date(performanceData.lastUpdated).toLocaleString() : 'Never'}`
-    ].join('\n');
-    
-    return {
-      content: [{
-        type: "text" as const,
-        text: `Performance data for Flutter app with ID ${appId}:\n\n${formattedData}`
-      }]
-    };
   } catch (error) {
-    logger.error('Error getting performance data:', error);
-    return {
-      content: [{
-        type: "text" as const,
-        text: `Error getting performance data: ${error instanceof Error ? error.message : String(error)}`
-      }]
-    };
+    logger.error(`Error getting performance metrics for app ${appId}:`, error);
+    return { error: 'Failed to get performance metrics' };
   }
 }
 
 /**
- * Trigger a hot reload for a Flutter app
+ * Get device information
  */
-export async function hotReload({ appId }: { appId: string }) {
+export async function getDevices() {
   try {
-    logger.info(`Triggering hot reload for Flutter app with ID ${appId}`);
-    
-    // Check if connector is available
-    if (!flutterConnector.isConnectorAvailable()) {
-      logger.warn('Flutter Connector Server not available, using local implementation');
-      // Try to initialize the connector
-      const connected = await flutterConnector.initConnectorClient();
-      if (!connected) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: `Failed to connect to Flutter Connector Server. Please ensure it's running.`
-          }]
-        };
-      }
+    // Initialize connector if needed
+    if (!await initializeConnector()) {
+      return { error: 'Flutter Connector Server is not available' };
     }
     
-    // Get app using connector
-    const app = await flutterConnector.connectorGetApp(appId);
+    // Get devices from the connector
+    const response = await axios.get(`${FLUTTER_CONNECTOR_URL}/api/devices`, {
+      headers: getHeaders()
+    });
     
-    if (!app) {
-      return {
-        content: [{
-          type: "text" as const,
-          text: `App with ID ${appId} not found`
-        }]
-      };
+    if (response.status === 200) {
+      return { devices: response.data };
+    } else {
+      return { error: 'Failed to get devices' };
     }
-    
-    // Trigger hot reload using connector
-    const success = await flutterConnector.connectorHotReload(appId);
-    
-    if (!success) {
-      return {
-        content: [{
-          type: "text" as const,
-          text: `Failed to trigger hot reload for Flutter app with ID ${appId}`
-        }]
-      };
-    }
-    
-    return {
-      content: [{
-        type: "text" as const,
-        text: `Hot reload triggered successfully for Flutter app with ID ${appId}`
-      }]
-    };
   } catch (error) {
-    logger.error('Error triggering hot reload:', error);
-    return {
-      content: [{
-        type: "text" as const,
-        text: `Error triggering hot reload: ${error instanceof Error ? error.message : String(error)}`
-      }]
-    };
+    logger.error('Error getting devices:', error);
+    return { error: 'Failed to get devices' };
   }
 }
 
 /**
- * List all running Flutter apps
+ * Get available debugging information and DevTools URL
  */
-export async function listRunningApps() {
+export async function getDebugInfo(appId: string) {
   try {
-    logger.info('Listing all running Flutter apps');
-    
-    // Check if connector is available
-    if (!flutterConnector.isConnectorAvailable()) {
-      logger.warn('Flutter Connector Server not available, using local implementation');
-      // Try to initialize the connector
-      const connected = await flutterConnector.initConnectorClient();
-      if (!connected) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: `Failed to connect to Flutter Connector Server. Please ensure it's running.`
-          }]
-        };
-      }
+    // Initialize connector if needed
+    if (!await initializeConnector()) {
+      return { error: 'Flutter Connector Server is not available' };
     }
     
-    // Get apps using connector
-    const apps = await flutterConnector.connectorListApps();
+    // Get debug information from the connector
+    const response = await axios.get(`${FLUTTER_CONNECTOR_URL}/api/apps/${appId}/debug`, {
+      headers: getHeaders()
+    });
     
-    if (apps.length === 0) {
-      return {
-        content: [{
-          type: "text" as const,
-          text: 'No Flutter apps are currently running'
-        }]
-      };
+    if (response.status === 200) {
+      return { debug: response.data };
+    } else {
+      return { error: 'Failed to get debug information' };
     }
-    
-    // Format the apps
-    const formattedApps = apps.map(app => {
-      return `ID: ${app.id}\nStatus: ${app.status}\nProject: ${app.projectPath}\nDevice: ${app.deviceId}\nVM Service URL: ${app.vmServiceUrl || 'Not available'}\n`;
-    }).join('\n---\n\n');
-    
-    return {
-      content: [{
-        type: "text" as const,
-        text: `Running Flutter apps:\n\n${formattedApps}`
-      }]
-    };
   } catch (error) {
-    logger.error('Error listing running apps:', error);
-    return {
-      content: [{
-        type: "text" as const,
-        text: `Error listing running apps: ${error instanceof Error ? error.message : String(error)}`
-      }]
-    };
+    logger.error(`Error getting debug info for app ${appId}:`, error);
+    return { error: 'Failed to get debug information' };
+  }
+}
+
+/**
+ * Get system health status
+ */
+export async function getSystemHealth() {
+  try {
+    // Initialize connector if needed
+    if (!await initializeConnector()) {
+      return { error: 'Flutter Connector Server is not available' };
+    }
+    
+    // Get health status from the connector
+    const response = await axios.get(`${FLUTTER_CONNECTOR_URL}/api/health`, {
+      headers: getHeaders()
+    });
+    
+    if (response.status === 200) {
+      return { health: response.data };
+    } else {
+      return { error: 'Failed to get system health' };
+    }
+  } catch (error) {
+    logger.error('Error getting system health:', error);
+    return { error: 'Failed to get system health' };
+  }
+}
+
+/**
+ * Get analytics insights for a Flutter app
+ */
+export async function getAnalyticsInsights(appId: string) {
+  try {
+    // Initialize connector if needed
+    if (!await initializeConnector()) {
+      return { error: 'Flutter Connector Server is not available' };
+    }
+    
+    // Get analytics insights from the connector
+    const response = await axios.get(`${FLUTTER_CONNECTOR_URL}/api/apps/${appId}/analytics`, {
+      headers: getHeaders()
+    });
+    
+    if (response.status === 200) {
+      return { insights: response.data };
+    } else {
+      return { error: 'Failed to get analytics insights' };
+    }
+  } catch (error) {
+    logger.error(`Error getting analytics insights for app ${appId}:`, error);
+    return { error: 'Failed to get analytics insights' };
   }
 }

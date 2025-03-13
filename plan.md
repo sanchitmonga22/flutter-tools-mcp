@@ -15,12 +15,13 @@ This approach has limitations:
 
 ## Architecture Enhancement Proposal
 
-We can significantly improve the architecture by adopting a similar approach to the browser-tools-mcp implementation, which uses a two-component system:
+We can significantly improve the architecture by adopting a similar approach to the browser-tools-mcp implementation, which uses a three-component system:
 
 1. **Flutter Connector Server**
    - A standalone service that runs continuously in the background
    - Automatically discovers and monitors all Flutter applications (both those started by the tools and externally)
-   - Collects logs, performance metrics, and other data in real-time
+   - Connects to Flutter's VM Service Protocol to collect data
+   - Collects logs, performance metrics, network activity, and other data in real-time
    - Provides a REST API for the MCP server to query
 
 2. **Flutter Tools MCP Server**
@@ -28,112 +29,406 @@ We can significantly improve the architecture by adopting a similar approach to 
    - Requests specific data from the connector rather than collecting it directly
    - Focuses on providing a clean tool interface and processing data for AI consumption
 
-## Implementation Plan
+3. **Flutter App Integration** 
+   - Instead of a browser extension, we use Flutter's built-in debugging capabilities
+   - VM Service Protocol provides access to app metrics, logs, and state
+   - Optional lightweight helper package for enhanced monitoring
 
-### Phase 1: Flutter Connector Server
+## Technical Implementation
 
-1. Create a standalone server application:
-   - Express.js server similar to browser-connector.ts
-   - Configurable port (default: 3030)
-   - Identity endpoint for MCP server discovery
+### Flutter Connector Server
 
-2. Implement Flutter app discovery mechanisms:
-   - Monitor running processes to detect Flutter apps
-   - Scan log files in standard locations
-   - Identify apps via VM service protocol (Dart Observatory)
-   - Support for manual registration of apps
+#### Core Components
 
-3. Build log collection functionality:
-   - Continuously collect logs from detected apps
-   - Parse and structure log data for easier consumption
-   - Maintain log history with configurable limits
+1. **App Discovery Mechanism**
+   - Monitor running processes to detect Flutter debug ports
+   - Scan standard port ranges (8000-9000) for VM services 
+   - Support manual registration of apps
+   - Track apps across restarts by app ID
 
-4. Add performance metrics collection:
-   - Connect to VM service for memory/CPU metrics
-   - Track startup time, frame rate, and other performance indicators
-   - Collect network request information when possible
+2. **VM Service Protocol Integration**
+   - Connect to Dart Observatory API (VM Service)
+   - Monitor isolate state and performance
+   - Stream logs from standard output and error channels
+   - Collect memory usage, CPU metrics, and frame times
+   - Support screenshot capture
 
-5. Create REST API endpoints:
-   - GET `/apps` - List all detected Flutter apps
-   - GET `/apps/:id/logs` - Get logs for a specific app
-   - GET `/apps/:id/metrics` - Get performance metrics
-   - POST `/apps/:id/hot-reload` - Trigger hot reload
-   - POST `/screenshot/:id` - Capture screenshot
-   - Additional endpoints for other operations
+3. **Event Monitoring System**
+   - Continuous log collection with rotating buffer
+   - Real-time performance metric tracking
+   - Network request monitoring
+   - UI event tracking
 
-### Phase 2: Update MCP Server
+4. **REST API Layer**
+   - Expose standardized endpoints for data access
+   - Support filtering and querying of collected data
+   - Implement server discovery via identity endpoint
+   - Provide real-time data access
 
-1. Modify the existing Flutter tools MCP server:
-   - Add connector discovery similar to browser-tools-mcp
-   - Update tool implementations to query the connector server
-   - Handle connection errors and fallbacks
+#### Key API Endpoints
 
-2. Enhance tool functions:
-   - Update all tool functions to use the connector server
-   - Add robust error handling for connector server communication
-   - Implement reconnection logic for reliability
+```
+GET /apps                       - List all detected Flutter apps
+GET /apps/:id                   - Get details for a specific app
+GET /apps/:id/logs              - Get logs for a specific app
+GET /apps/:id/metrics           - Get performance metrics
+GET /apps/:id/network           - Get network requests
+GET /apps/:id/ui                - Get widget tree information
+POST /apps/:id/hot-reload       - Trigger hot reload
+POST /apps/:id/screenshot       - Capture screenshot
+GET /.identity                  - Server identification endpoint
+```
 
-3. Add new capabilities:
-   - System-wide Flutter app monitoring (not just MCP-started apps)
-   - Better visualization of app performance data
-   - More detailed network request monitoring
+### Flutter Tools MCP Server
 
-### Phase 3: Additional Features
+#### MCP Tool Integration
 
-1. Enhanced device management:
-   - Better detection of connected devices
-   - Support for custom device configurations
-   - Improved device selection logic
+1. **Server Discovery**
+   - Automatic discovery of Flutter Connector Server
+   - Support for port configuration
+   - Fallback to direct VM service connection if connector unavailable
 
-2. Extended debugging capabilities:
-   - Integration with Flutter DevTools
-   - Support for more complex debugging scenarios
-   - Custom instrumentation options
+2. **Tool Implementation**
+   - `getFlutterApps` - List all running Flutter apps
+   - `getAppLogs` - Get logs for a specific app
+   - `getPerformanceMetrics` - Get app performance metrics
+   - `getNetworkActivity` - View network requests
+   - `getWidgetTree` - Examine UI component hierarchy
+   - `captureScreenshot` - Take a screenshot of the app
+   - `hotReload` - Trigger a hot reload
+   - `inspectMemory` - Analyze memory usage
+   - `analyzeCrash` - Debug crash reports
 
-3. Analytics and insights:
-   - Trend analysis for performance metrics
-   - Anomaly detection for app behavior
-   - Recommendations for performance improvements
+3. **Data Processing Pipeline**
+   - Structured log parsing and formatting for AI consumption
+   - Performance data visualization preparation
+   - Network traffic analysis
+   - Crash and error context collection
+
+### Flutter App Integration
+
+1. **VM Service Protocol Usage**
+   - Leverage existing Flutter debug protocol
+   - No modification required for most apps
+   - Works with any Flutter app in debug mode
+
+2. **Optional Helper Package**
+   - Enhanced logging support
+   - Custom performance events
+   - Network request/response logging
+   - Widget rebuild tracking
+
+## Technical Implementation Details
+
+### Flutter Connector Server
+
+```typescript
+// Core server architecture
+class FlutterConnectorServer {
+  private apps: Map<string, FlutterAppConnection> = new Map();
+  private logStorage: Map<string, LogEntry[]> = new Map();
+  private metricsStorage: Map<string, PerformanceMetrics[]> = new Map();
+  private networkStorage: Map<string, NetworkRequest[]> = new Map();
+  
+  constructor(private config: ServerConfig) {
+    this.initializeServer();
+    this.startAppDiscovery();
+  }
+  
+  private async startAppDiscovery() {
+    // Periodically scan for new Flutter apps
+    setInterval(async () => {
+      const newApps = await this.discoverFlutterApps();
+      for (const app of newApps) {
+        if (!this.apps.has(app.id)) {
+          await this.connectToApp(app);
+        }
+      }
+    }, this.config.discoveryInterval);
+  }
+  
+  private async connectToApp(app: FlutterApp) {
+    try {
+      // Connect to VM Service
+      const connection = new FlutterAppConnection(app);
+      await connection.connect();
+      
+      // Set up event listeners
+      connection.on('log', (log) => this.storeLog(app.id, log));
+      connection.on('metrics', (metrics) => this.storeMetrics(app.id, metrics));
+      connection.on('network', (request) => this.storeNetwork(app.id, request));
+      
+      this.apps.set(app.id, connection);
+      console.log(`Connected to Flutter app: ${app.name} (${app.id})`);
+    } catch (error) {
+      console.error(`Failed to connect to app ${app.id}:`, error);
+    }
+  }
+  
+  // API Endpoints implementation
+  private initializeServer() {
+    const app = express();
+    
+    // List all apps
+    app.get('/apps', (req, res) => {
+      const appList = Array.from(this.apps.values()).map(conn => conn.getAppInfo());
+      res.json(appList);
+    });
+    
+    // Get app logs
+    app.get('/apps/:id/logs', (req, res) => {
+      const logs = this.logStorage.get(req.params.id) || [];
+      res.json(logs);
+    });
+    
+    // Add other endpoints...
+    
+    app.listen(this.config.port, () => {
+      console.log(`Flutter Connector Server running on port ${this.config.port}`);
+    });
+  }
+}
+```
+
+### VM Service Protocol Integration
+
+```typescript
+class FlutterAppConnection extends EventEmitter {
+  private vmService: VmServiceClient;
+  private isConnected = false;
+  
+  constructor(private app: FlutterApp) {
+    super();
+  }
+  
+  async connect() {
+    const uri = `ws://localhost:${this.app.port}/ws`;
+    this.vmService = await connectToVmService(uri);
+    
+    // Set up stream listeners
+    await this.vmService.streamListen('Stdout');
+    await this.vmService.streamListen('Stderr');
+    await this.vmService.streamListen('Extension');
+    
+    // Handle log events
+    this.vmService.onEvent('Stdout', (event) => {
+      this.emit('log', {
+        level: 'info',
+        message: event.log,
+        timestamp: new Date().toISOString()
+      });
+    });
+    
+    this.vmService.onEvent('Stderr', (event) => {
+      this.emit('log', {
+        level: 'error',
+        message: event.log,
+        timestamp: new Date().toISOString()
+      });
+    });
+    
+    // Start collecting metrics
+    this.startMetricsCollection();
+    
+    this.isConnected = true;
+  }
+  
+  async startMetricsCollection() {
+    // Collect metrics every second
+    setInterval(async () => {
+      if (!this.isConnected) return;
+      
+      try {
+        const metrics = await this.getMetrics();
+        this.emit('metrics', {
+          ...metrics,
+          timestamp: new Date().toISOString()
+        });
+      } catch (error) {
+        console.error('Failed to collect metrics:', error);
+      }
+    }, 1000);
+  }
+  
+  async getMetrics() {
+    const vm = await this.vmService.getVM();
+    const isolateId = vm.isolates[0].id;
+    
+    // Get memory stats
+    const memoryUsage = await this.vmService.getMemoryUsage(isolateId);
+    
+    // Get UI stats if available
+    let uiMetrics = {};
+    try {
+      const result = await this.vmService.callExtensionMethod('ext.flutter.inspector.stats');
+      uiMetrics = result.response;
+    } catch (e) {
+      // UI extension might not be available
+    }
+    
+    return {
+      memory: {
+        heapUsage: memoryUsage.heapUsage,
+        heapCapacity: memoryUsage.heapCapacity,
+        externalUsage: memoryUsage.externalUsage
+      },
+      ui: uiMetrics
+    };
+  }
+  
+  async captureScreenshot() {
+    try {
+      const result = await this.vmService.callExtensionMethod('ext.flutter.inspector.screenshot');
+      return result.response.data; // Base64 encoded image
+    } catch (error) {
+      throw new Error(`Failed to capture screenshot: ${error.message}`);
+    }
+  }
+  
+  async hotReload() {
+    try {
+      const vm = await this.vmService.getVM();
+      const isolateId = vm.isolates[0].id;
+      const result = await this.vmService.callExtensionMethod('ext.flutter.reassemble', {isolateId});
+      return {success: true};
+    } catch (error) {
+      throw new Error(`Hot reload failed: ${error.message}`);
+    }
+  }
+  
+  getAppInfo() {
+    return {
+      id: this.app.id,
+      name: this.app.name,
+      deviceType: this.app.deviceType,
+      startTime: this.app.startTime,
+      status: this.isConnected ? 'connected' : 'disconnected'
+    };
+  }
+}
+```
+
+### Flutter Tools MCP Server
+
+```typescript
+// MCP Server implementation
+class FlutterToolsMcpServer {
+  private server: McpServer;
+  private connectorService: ConnectorService;
+  private connected = false;
+  
+  constructor() {
+    this.server = new McpServer({
+      name: "Flutter Tools MCP",
+      version: "1.0.0"
+    });
+    
+    this.connectorService = new ConnectorService();
+    this.setupTools();
+  }
+  
+  private async setupTools() {
+    // Tool: List Flutter apps
+    this.server.tool("getFlutterApps", "List all running Flutter apps", async () => {
+      await this.ensureConnected();
+      const apps = await this.connectorService.getApps();
+      return {
+        content: [{ type: "text", text: JSON.stringify(apps, null, 2) }]
+      };
+    });
+    
+    // Tool: Get logs
+    this.server.tool("getAppLogs", "Get logs for a Flutter app", 
+                     { appId: z.string() }, 
+                     async ({ appId }) => {
+      await this.ensureConnected();
+      const logs = await this.connectorService.getLogs(appId);
+      return {
+        content: [{ type: "text", text: JSON.stringify(logs, null, 2) }]
+      };
+    });
+    
+    // Other tools for metrics, network, UI inspection, etc.
+  }
+  
+  private async ensureConnected() {
+    if (!this.connected) {
+      this.connected = await this.connectorService.discoverAndConnect();
+      if (!this.connected) {
+        throw new Error("Could not connect to Flutter Connector Server");
+      }
+    }
+  }
+  
+  async start() {
+    const transport = new StdioServerTransport();
+    await this.server.connect(transport);
+  }
+}
+```
 
 ## Implementation Schedule
 
-1. **Week 1-2**: Develop core Flutter Connector Server
-   - Basic app discovery and monitoring
-   - Log collection functionality
-   - Initial REST API endpoints
+1. **Week 1-2**: Flutter Connector Server Development
+   - Implement VM Service Protocol integration
+   - Build app discovery mechanism
+   - Create log and metrics collection system
+   - Develop REST API endpoints
 
-2. **Week 3**: Update MCP Server tools
-   - Connector discovery implementation
-   - Update existing tools to use connector
-   - Testing and debugging
+2. **Week 3**: Optional Flutter Integration Package
+   - Create lightweight Flutter package for enhanced monitoring
+   - Implement network request tracking
+   - Add custom performance event tracking
+   - Develop widget rebuild monitoring
 
-3. **Week 4**: Refinement and additional features
-   - Enhance connector capabilities
-   - Add new tools and features
-   - Documentation and polishing
+3. **Week 4**: Flutter Tools MCP Server 
+   - Build connector discovery and connection management
+   - Implement MCP tools interface
+   - Create data processing and formatting for AI consumption
+   - Develop error handling and recovery
 
-## Technical Considerations
-
-1. **Cross-platform Support**:
-   - Ensure Windows, macOS, and Linux compatibility
-   - Handle platform-specific paths and commands
-
-2. **Security**:
-   - Implement authentication for connector API
-   - Consider encrypting sensitive data
-
-3. **Performance**:
-   - Optimize log collection for minimal overhead
-   - Implement efficient data storage and retrieval
-
-4. **Reliability**:
-   - Robust error handling
-   - Graceful degradation when services are unavailable
-   - Self-healing mechanisms
+4. **Week 5**: Integration Testing and Refinement
+   - Test with various Flutter apps
+   - Optimize performance and reliability
+   - Enhance error handling
+   - Improve documentation
 
 ## Future Extensions
 
-1. Integration with cloud services for remote debugging
-2. Support for custom plugins to extend functionality
-3. Historical data analysis for performance trends
-4. CI/CD integration for automated testing 
+1. **Advanced Debugging**
+   - Visual widget tree exploration
+   - State management analysis
+   - Performance bottleneck detection
+   - Memory leak detection
+
+2. **Analytics Dashboard**
+   - Real-time metrics visualization
+   - Historical performance tracking
+   - Crash analysis tools
+   - Usage insights
+
+3. **CI/CD Integration**
+   - Automated testing integration
+   - Performance regression detection
+   - Build and deployment tools
+   - Device lab integration
+
+4. **Multi-Device Support**
+   - Simultaneous monitoring of multiple devices
+   - Cross-device performance comparison
+   - Synchronized testing across platforms
+   - Remote device debugging support
+
+## Technical Requirements
+
+### Development Environment
+- Node.js 14+ for server components
+- TypeScript for type safety and maintainability
+- Express for REST API implementation
+- Flutter SDK for testing and integration
+
+### Deployment Requirements
+- Works on Windows, macOS, and Linux
+- Minimal dependencies for easy installation
+- Support for remote debugging scenarios
+- Compatible with Flutter 2.0+ applications 
