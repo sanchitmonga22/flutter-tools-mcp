@@ -1,91 +1,93 @@
-# Flutter Tools MCP
+# Flutter Tools MCP Server
 
-A Model Context Protocol (MCP) server for Flutter development tools. This server provides AI assistants with the ability to interact with Flutter applications through a standardized interface.
+The Flutter Tools MCP (Model Context Protocol) Server provides a bridge between AI assistants and Flutter applications. It enables AI models to interact with and debug Flutter apps by exposing tools for capturing metrics, logs, screenshots, and more.
 
 ## Features
 
-- Start and stop Flutter applications
-- Get logs from running apps
-- Take screenshots
-- Monitor network traffic
-- Collect performance metrics
-- Trigger hot reloads
-- List running Flutter apps
+- Connect to and monitor Flutter applications
+- Real-time metrics and logs from Flutter apps
+- Screenshot capabilities
+- Hot reload support
+- WebSocket API for real-time updates
+- REST API for programmatic access
 
-## Architecture
+## Getting Started
 
-The Flutter Tools MCP consists of two components:
+### Prerequisites
 
-1. **MCP Server**: This is the main server that implements the Model Context Protocol and exposes Flutter tools to AI assistants.
-2. **Flutter Connector Server**: A standalone server that runs in the background and monitors Flutter applications. The MCP server connects to this server to get information about running apps.
+- Node.js 18 or higher
+- [Flutter Connector Server](../flutter-connector-server) running
 
-## Installation
+### Installation
 
 ```bash
-# Install dependencies
+git clone https://github.com/your-repo/flutter-tools-mcp.git
+cd flutter-tools-mcp/mcp
 npm install
+```
 
-# Build the TypeScript code
+### Usage
+
+To start the server:
+
+```bash
 npm run build
-
-# Start the server
 npm start
 ```
 
-## Usage with Flutter Connector Server
-
-For the best experience, you should run the Flutter Connector Server alongside the MCP server. The Flutter Connector Server provides real-time monitoring of Flutter applications and enables features like auto-discovery of running apps.
-
-### Starting the Flutter Connector Server
+Or in development mode:
 
 ```bash
-# Navigate to the Flutter Connector Server directory
-cd flutter-connector-server
-
-# Install dependencies
-npm install
-
-# Build the TypeScript code
-npm run build
-
-# Start the server
-npm start
-```
-
-By default, the Flutter Connector Server runs on port 3030. You can configure this using environment variables:
-
-```bash
-FLUTTER_CONNECTOR_PORT=3031 npm start
-```
-
-### Configuring the MCP Server to Connect to the Flutter Connector Server
-
-The MCP server will automatically try to connect to the Flutter Connector Server at `localhost:3030`. You can configure this using environment variables:
-
-```bash
-FLUTTER_CONNECTOR_HOST=192.168.1.100 FLUTTER_CONNECTOR_PORT=3031 npm start
-```
-
-## Available Tools
-
-The following tools are available to AI assistants:
-
-- `start-app`: Start a Flutter app on a device or emulator
-- `stop-app`: Stop a running Flutter app
-- `get-logs`: Get logs from a running Flutter app
-- `take-screenshot`: Take a screenshot of a running Flutter app
-- `get-network-data`: Get network traffic data from a running Flutter app
-- `get-performance-data`: Get performance metrics from a running Flutter app
-- `hot-reload`: Trigger a hot reload in a running Flutter app
-- `list-apps`: List all running Flutter apps
-
-## Development
-
-```bash
-# Start with auto-reloading for development
 npm run dev
 ```
 
+The server will run on port 5052 by default and connect to the Flutter Connector Server at `http://localhost:5051`.
+
+## API Reference
+
+### Base URL
+
+```
+http://localhost:5052
+```
+
+### Endpoints
+
+- `GET /api/info` - Get server information
+- `GET /api/apps` - List all available Flutter apps
+- `GET /api/apps/:id` - Get details for a specific app
+- `POST /api/apps` - Manually add a Flutter app
+- `POST /api/apps/:id/monitor` - Start monitoring an app
+- `POST /api/apps/:id/stop` - Stop monitoring an app
+- `GET /api/apps/:id/logs` - Get logs for an app
+- `DELETE /api/apps/:id/logs` - Clear logs for an app
+- `GET /api/apps/:id/metrics` - Get performance metrics for an app
+- `GET /api/apps/:id/network` - Get network requests for an app
+- `POST /api/apps/:id/hot-reload` - Trigger a hot reload of an app
+- `GET /api/apps/:id/screenshot` - Capture a screenshot of an app
+
+## WebSocket API
+
+The server provides a WebSocket endpoint that emits real-time updates about Flutter apps. Connect to `ws://localhost:5052` to receive events.
+
+### Message Types
+
+- `apps` - List of all available Flutter apps
+- `logs` - Logs from a specific app
+- `metrics` - Performance metrics from a specific app
+- `network` - Network requests from a specific app
+
+## Environment Variables
+
+- `PORT` - Server port (default: 5052)
+- `HOST` - Server host (default: localhost)
+- `CONNECTOR_URL` - URL of the Flutter Connector Server (default: http://localhost:5051)
+- `POLLING_INTERVAL` - How often to poll for updates in milliseconds (default: 2000)
+
+## Architecture
+
+The Flutter Tools MCP Server connects to the Flutter Connector Server to retrieve information about Flutter applications and relay that information to AI assistants or other clients. It acts as a bridge between the AI models and the Flutter apps.
+
 ## License
 
-MIT 
+This project is licensed under the MIT License - see the LICENSE file for details. 

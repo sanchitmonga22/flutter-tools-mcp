@@ -1,137 +1,111 @@
-/**
- * Flutter MCP Server - Main entry point
- * 
- * This server provides MCP tools for debugging and monitoring Flutter applications
- */
-
+#!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { logger } from './utils/logger.js';
-import {
-  startApp, startAppSchema,
-  stopApp, stopAppSchema,
-  getLogs, getLogsSchema,
-  takeScreenshot, takeScreenshotSchema,
-  getNetworkData, getNetworkDataSchema,
-  getPerformanceData, getPerformanceDataSchema,
-  hotReload, hotReloadSchema,
-  listRunningApps, listRunningAppsSchema
-} from './tools/flutter-tools.js';
-import { initConnectorClient, configureConnectorClient } from './tools/flutter-connector-client.js';
+import { z } from "zod";
+
+// Import tool implementations
+import { listFlutterApps } from "./tools/list-flutter-apps.js";
+import { connectToApp } from "./tools/connect-to-app.js";
+import { getAppLogs } from "./tools/get-app-logs.js";
+import { getPerformanceMetrics } from "./tools/get-performance-metrics.js";
+import { getNetworkRequests } from "./tools/get-network-requests.js";
+import { takeScreenshot } from "./tools/take-screenshot.js";
+import { getWidgetTree } from "./tools/get-widget-tree.js";
+import { analyzePerformance } from "./tools/analyze-performance.js";
 
 // Create server instance
 const server = new McpServer({
-  name: "flutter-mcp-server",
+  name: "flutter-tools",
   version: "1.0.0",
 });
 
-// Register all Flutter tools
-logger.info('Registering Flutter tools...');
+// Register Flutter tool
 
-// Start app tool
+// App Discovery Tools
 server.tool(
-  "start-app",
-  "Start a Flutter app on a device or emulator",
-  startAppSchema,
-  startApp
+  "list-flutter-apps",
+  "List all running Flutter applications",
+  {},
+  listFlutterApps
 );
 
-// Stop app tool
 server.tool(
-  "stop-app",
-  "Stop a running Flutter app",
-  stopAppSchema,
-  stopApp
+  "connect-to-app",
+  "Connect to a specific Flutter app by ID",
+  {
+    appId: z.string().describe("The ID of the Flutter app to connect to")
+  },
+  connectToApp
 );
 
-// Get logs tool
+// Log and Metrics Collection Tools
 server.tool(
-  "get-logs",
-  "Get logs from a running Flutter app",
-  getLogsSchema,
-  getLogs
+  "get-app-logs",
+  "Retrieve logs from a connected Flutter app",
+  {
+    appId: z.string().describe("The ID of the Flutter app to get logs from"),
+    lines: z.number().optional().describe("Number of log lines to retrieve (optional)")
+  },
+  getAppLogs
 );
 
-// Take screenshot tool
+server.tool(
+  "get-performance-metrics",
+  "Get performance metrics from a Flutter app",
+  {
+    appId: z.string().describe("The ID of the Flutter app to get metrics from"),
+    metric: z.enum(["memory", "cpu", "ui", "all"]).optional().describe("Specific metric to retrieve (optional, defaults to 'all')")
+  },
+  getPerformanceMetrics
+);
+
+server.tool(
+  "get-network-requests",
+  "Fetch network request data from a Flutter app",
+  {
+    appId: z.string().describe("The ID of the Flutter app to get network requests from"),
+    count: z.number().optional().describe("Number of recent network requests to retrieve (optional)")
+  },
+  getNetworkRequests
+);
+
+// Debugging Tools
 server.tool(
   "take-screenshot",
-  "Take a screenshot of a running Flutter app",
-  takeScreenshotSchema,
+  "Capture a screenshot of the Flutter app UI",
+  {
+    appId: z.string().describe("The ID of the Flutter app to take screenshot from")
+  },
   takeScreenshot
 );
 
-// Get network data tool
 server.tool(
-  "get-network-data",
-  "Get network traffic data from a running Flutter app",
-  getNetworkDataSchema,
-  getNetworkData
+  "get-widget-tree",
+  "Retrieve the widget tree structure of a Flutter app",
+  {
+    appId: z.string().describe("The ID of the Flutter app to get widget tree from")
+  },
+  getWidgetTree
 );
 
-// Get performance data tool
 server.tool(
-  "get-performance-data",
-  "Get performance metrics from a running Flutter app",
-  getPerformanceDataSchema,
-  getPerformanceData
+  "analyze-performance",
+  "Run a performance analysis on the Flutter app",
+  {
+    appId: z.string().describe("The ID of the Flutter app to analyze"),
+    duration: z.number().optional().describe("Duration of the analysis in seconds (optional, defaults to 5)")
+  },
+  analyzePerformance
 );
 
-// Hot reload tool
-server.tool(
-  "hot-reload",
-  "Trigger a hot reload in a running Flutter app",
-  hotReloadSchema,
-  hotReload
-);
-
-// List running apps tool
-server.tool(
-  "list-apps",
-  "List all running Flutter apps",
-  listRunningAppsSchema,
-  listRunningApps
-);
-
-// Start the server
-async function main(): Promise<void> {
-  try {
-    // Configure and initialize the Flutter Connector Client
-    logger.info("Initializing Flutter Connector Client...");
-    
-    // Configure from environment variables if available
-    const connectorHost = process.env.FLUTTER_CONNECTOR_HOST || 'localhost';
-    const connectorPort = process.env.FLUTTER_CONNECTOR_PORT 
-      ? parseInt(process.env.FLUTTER_CONNECTOR_PORT, 10) 
-      : 3030;
-    
-    configureConnectorClient({
-      host: connectorHost,
-      port: connectorPort
-    });
-    
-    // Try to connect to the Flutter Connector Server
-    try {
-      const connected = await initConnectorClient();
-      if (connected) {
-        logger.info("Successfully connected to Flutter Connector Server");
-      } else {
-        logger.warn("Could not connect to Flutter Connector Server. Some functionality may be limited.");
-      }
-    } catch (error) {
-      logger.warn(`Error connecting to Flutter Connector Server: ${error instanceof Error ? error.message : String(error)}`);
-      logger.warn("Continuing without Flutter Connector Server. Some functionality may be limited.");
-    }
-    
-    // Start the MCP server
-    const transport = new StdioServerTransport();
-    logger.info("Connecting to transport...");
-    await server.connect(transport);
-    logger.info("Flutter MCP Server running");
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    logger.error(`Fatal error: ${errorMessage}`);
-    process.exit(1);
-  }
+// Main function to run the server
+async function main() {
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  console.error("Flutter Tools MCP Server running on stdio");
 }
 
-main(); 
+main().catch((error) => {
+  console.error("Fatal error in main():", error);
+  process.exit(1);
+}); 

@@ -1,83 +1,86 @@
 # Flutter Connector Server
 
-A standalone server for monitoring and controlling Flutter applications. This server runs in the background and provides a REST API and WebSocket interface for the MCP (Model Context Protocol) server to interact with Flutter applications.
+The Flutter Connector Server is a standalone server that provides a bridge between Flutter applications and monitoring tools. It leverages the Flutter VM Service Protocol to collect data from running Flutter apps.
 
 ## Features
 
-- Auto-discovery of running Flutter applications
-- Real-time log collection from Flutter apps
-- Performance metrics monitoring
-- Hot reload support
-- Screenshot capture
-- API for starting and stopping Flutter apps
-- WebSocket notifications for real-time updates
+- Automatic discovery of Flutter applications
+- Real-time monitoring of app logs, performance metrics, and network requests
+- REST API for accessing and controlling Flutter apps
+- Screenshots and hot reload capabilities
 
-## Installation
+## Getting Started
+
+### Prerequisites
+
+- Node.js 18 or higher
+- A running Flutter application in debug mode
+
+### Installation
 
 ```bash
-# Install dependencies
+git clone https://github.com/your-repo/flutter-connector-server.git
+cd flutter-connector-server
 npm install
+```
 
-# Build the TypeScript code
+### Usage
+
+To start the server:
+
+```bash
 npm run build
-
-# Start the server
 npm start
 ```
 
-## Development
+Or in development mode:
 
 ```bash
-# Start with auto-reloading for development
 npm run dev
 ```
 
-## Configuration
+The server will run on port 5051 by default.
 
-The server can be configured using environment variables:
+## API Reference
 
-- `FLUTTER_CONNECTOR_PORT`: Port to run the server on (default: 3030)
-- `FLUTTER_CONNECTOR_HOST`: Host to bind to (default: 0.0.0.0)
-- `LOG_LEVEL`: Logging level (0 = DEBUG, 1 = INFO, 2 = WARN, 3 = ERROR)
+### Base URL
 
-## API Endpoints
+```
+http://localhost:5051
+```
 
-The following REST API endpoints are available:
+### Endpoints
 
-### App Management
+- `GET /api/info` - Get server information
+- `GET /api/apps` - List all discovered Flutter apps
+- `GET /api/apps/:id` - Get details for a specific app
+- `POST /api/apps` - Manually add a Flutter app
+- `POST /api/apps/:id/monitor` - Start monitoring an app
+- `POST /api/apps/:id/stop` - Stop monitoring an app
+- `GET /api/apps/:id/logs` - Get logs for an app
+- `DELETE /api/apps/:id/logs` - Clear logs for an app
+- `GET /api/apps/:id/metrics` - Get performance metrics for an app
+- `GET /api/apps/:id/network` - Get network requests for an app
+- `POST /api/apps/:id/hot-reload` - Trigger a hot reload of an app
+- `GET /api/apps/:id/screenshot` - Capture a screenshot of an app
 
-- `GET /api/apps`: List all monitored Flutter apps
-- `GET /api/apps/:id`: Get details about a specific app
-- `POST /api/apps`: Start a new Flutter app
-- `DELETE /api/apps/:id`: Stop a running Flutter app
+## Environment Variables
 
-### Logs and Metrics
-
-- `GET /api/apps/:id/logs`: Get logs for a specific app
-- `POST /api/apps/:id/logs`: Add a log entry to an app
-- `GET /api/apps/:id/performance`: Get performance metrics for an app
-- `POST /api/apps/:id/performance`: Update performance metrics
-
-### Operations
-
-- `POST /api/apps/:id/hot-reload`: Trigger hot reload for an app
-- `POST /api/screenshot/:id`: Take a screenshot of a running app
-
-### System
-
-- `GET /.identity`: Get server identity for MCP discovery
-- `GET /.port`: Get current server port
-- `GET /health`: Health check endpoint
-
-## WebSocket API
-
-The server also provides a WebSocket API at `/ws` for real-time updates. Clients can receive notifications about app status changes, logs, and other events.
+- `PORT` - Server port (default: 5051)
+- `HOST` - Server host (default: localhost)
+- `DISCOVERY_INTERVAL` - How often to scan for new Flutter apps in milliseconds (default: 5000)
+- `LOG_LEVEL` - Logging level (default: info)
+- `LOG_FILE` - Optional file path for logs
 
 ## Architecture
 
-This server is part of a two-component system:
+The Flutter Connector Server is built with a modular architecture:
 
-1. **Flutter Connector Server**: Monitors and controls Flutter applications
-2. **MCP Server**: Provides a model context protocol interface for AI models
+1. **App Discovery Service** - Scans for running Flutter applications
+2. **VM Service Client** - Communicates with the Flutter VM Service Protocol
+3. **App Monitor Service** - Collects and manages data from Flutter apps
+4. **REST API Server** - Exposes the collected data via HTTP endpoints
 
-The Flutter Connector Server runs continuously in the background, while the MCP Server connects to it as needed to fulfill tool requests from AI models. 
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details. 
