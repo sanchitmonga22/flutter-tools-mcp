@@ -126,6 +126,35 @@ You need to run both the Flutter Connector Server and the MCP Server:
    ```
    This will start the MCP server running on stdio, ready to connect to MCP clients.
 
+### Using with Flutter Apps
+
+To use the Flutter Tools MCP with your Flutter applications, follow these steps:
+
+1. **Launch your Flutter app in debug mode**:
+   ```bash
+   flutter run
+   ```
+
+2. **Note the VM Service URL** that appears in the console output. It will look something like:
+   ```
+   Connecting to VM Service at ws://127.0.0.1:55285/xxxxxxxxxxxx=/ws
+   ```
+
+3. **IMPORTANT: Connect to your Flutter app using the VM Service URL first**:
+   This is a crucial step! Before using any other tools, you must first connect to your Flutter app using the `connect-by-url` tool with the VM Service URL from step 2.
+
+   Example:
+   ```
+   connect-by-url --vmServiceUrl ws://127.0.0.1:55285/xxxxxxxxxxxx=/ws
+   ```
+
+4. **After connecting**, you can use all other tools with the app ID returned from the connection step:
+   ```
+   get-performance-metrics --appId YOUR_APP_ID
+   get-app-logs --appId YOUR_APP_ID
+   take-screenshot --appId YOUR_APP_ID
+   ```
+
 ### Using with Claude for Desktop
 
 To use the Flutter Tools MCP with Claude for Desktop:
@@ -156,7 +185,9 @@ To use the Flutter Tools MCP with Claude for Desktop:
 
 3. Save the file and restart Claude for Desktop.
 
-4. You should now see the Flutter tools icon in the Claude for Desktop interface, allowing you to use all the tools for Flutter app debugging and optimization.
+4. You should now see the Flutter tools icon in the Claude for Desktop interface.
+
+5. **Remember**: Always use the `connect-by-url` tool first with your VM Service URL before using any other tools.
 
 ### Using with Cursor
 
@@ -171,54 +202,7 @@ To integrate with Cursor:
      node /ABSOLUTE/PATH/TO/flutter-tools-mcp/mcp/build/index.js
      ```
 3. Restart Cursor to apply the changes
-4. You can now use the Flutter tools within Cursor to analyze and debug your Flutter apps
-
-### Using with Other MCP Clients
-
-For other MCP-compatible clients:
-
-1. Build the MCP server:
-   ```bash
-   cd mcp
-   npm run build
-   ```
-
-2. Point your MCP client to the built executable:
-   ```
-   node /path/to/flutter-tools-mcp/mcp/build/index.js
-   ```
-
-3. Configure any client-specific settings according to the client's documentation
-
-### Debugging a Flutter App
-
-To debug a Flutter app:
-
-1. Start your Flutter app in debug mode:
-   ```bash
-   flutter run
-   ```
-
-2. The Flutter Connector Server will automatically detect your running app.
-
-3. Use the tools provided by the MCP server through your AI assistant (Claude, Cursor, etc.) with commands like:
-   - "List all running Flutter apps"
-   - "Show me the performance metrics for my Flutter app"
-   - "Take a screenshot of my Flutter app"
-   - "Show me the network requests my Flutter app is making"
-
-## Configuration
-
-Both servers can be configured using environment variables:
-
-- **MCP Server**
-  - `MCP_PORT`: Port to listen on (default: 3000)
-  - `MCP_HOST`: Host to bind to (default: localhost)
-
-- **Flutter Connector Server**
-  - `FLUTTER_CONNECTOR_PORT`: Port to listen on (default: 5051)
-  - `FLUTTER_CONNECTOR_HOST`: Host to bind to (default: localhost)
-  - `FLUTTER_CONNECTOR_API_KEY`: API key for authentication (optional)
+4. **Important**: When using the Flutter tools in Cursor, always start by connecting to your app with the `connect-by-url` tool and the VM Service URL before using any other tools.
 
 ## Available MCP Tools
 
@@ -226,6 +210,7 @@ The MCP server provides the following tools for AI assistants:
 
 | Tool Name | Description |
 |-----------|-------------|
+| `connect-by-url` | **FIRST STEP**: Connect to a Flutter app using the VM Service URL |
 | `list-flutter-apps` | List all running Flutter applications |
 | `connect-to-app` | Connect to a specific Flutter app by ID |
 | `get-app-logs` | Retrieve logs from a connected Flutter app |
@@ -242,6 +227,7 @@ The MCP server provides the following tools for AI assistants:
 ```
 GET /api/apps - List running apps
 GET /api/apps/{appId} - Get app details
+POST /api/apps/from-url - Add an app using VM service URL
 GET /api/apps/{appId}/logs - Get app logs
 GET /api/apps/{appId}/metrics - Get performance metrics
 GET /api/apps/{appId}/network - Get network traffic

@@ -43,6 +43,49 @@ npm run dev
 
 The server will run on port 5052 by default and connect to the Flutter Connector Server at `http://localhost:5051`.
 
+### Connecting to Flutter Apps
+
+**IMPORTANT**: When using the Flutter Tools MCP, you must always follow this workflow:
+
+1. **Launch your Flutter app in debug mode**:
+   ```bash
+   flutter run
+   ```
+
+2. **Note the VM Service URL** that appears in the console output. It will look something like:
+   ```
+   Connecting to VM Service at ws://127.0.0.1:55285/xxxxxxxxxxxx=/ws
+   ```
+
+3. **Connect to your Flutter app using the VM Service URL first**:
+   This is a crucial step! Before using any other tools, you must first connect to your Flutter app using the `connect-by-url` tool with the VM Service URL from step 2.
+
+   Example:
+   ```
+   connect-by-url --vmServiceUrl ws://127.0.0.1:55285/xxxxxxxxxxxx=/ws
+   ```
+
+4. **After connecting**, you can use all other tools with the app ID returned from the connection step:
+   ```
+   get-performance-metrics --appId YOUR_APP_ID
+   get-app-logs --appId YOUR_APP_ID
+   take-screenshot --appId YOUR_APP_ID
+   ```
+
+## Available Tools
+
+| Tool Name | Description |
+|-----------|-------------|
+| `connect-by-url` | **FIRST STEP**: Connect to a Flutter app using the VM Service URL |
+| `list-flutter-apps` | List all running Flutter applications |
+| `connect-to-app` | Connect to a specific Flutter app by ID |
+| `get-app-logs` | Retrieve logs from a connected Flutter app |
+| `get-performance-metrics` | Get performance metrics from a Flutter app |
+| `get-network-requests` | Fetch network request data from a Flutter app |
+| `take-screenshot` | Capture a screenshot of the Flutter app UI |
+| `get-widget-tree` | Retrieve the widget tree structure of a Flutter app |
+| `analyze-performance` | Run a performance analysis on the Flutter app |
+
 ## API Reference
 
 ### Base URL
@@ -57,6 +100,7 @@ http://localhost:5052
 - `GET /api/apps` - List all available Flutter apps
 - `GET /api/apps/:id` - Get details for a specific app
 - `POST /api/apps` - Manually add a Flutter app
+- `POST /api/apps/from-url` - Add a Flutter app using VM service URL
 - `POST /api/apps/:id/monitor` - Start monitoring an app
 - `POST /api/apps/:id/stop` - Stop monitoring an app
 - `GET /api/apps/:id/logs` - Get logs for an app

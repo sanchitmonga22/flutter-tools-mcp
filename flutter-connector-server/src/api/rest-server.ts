@@ -190,6 +190,37 @@ export class RestServer {
       }
     });
 
+    // Add an app by VM service URL
+    this.app.post('/api/apps/from-url', async (req, res) => {
+      try {
+        const { vmServiceUrl, deviceType } = req.body;
+        if (!vmServiceUrl) {
+          res.status(400).json({ error: 'VM service URL is required' });
+          return;
+        }
+
+        const app = await this.appDiscoveryService.addAppFromUrl(vmServiceUrl, deviceType);
+        if (!app) {
+          res.status(404).json({ error: 'Could not connect to Flutter app at the specified URL' });
+          return;
+        }
+
+        res.status(201).json({
+          id: app.id,
+          name: app.name,
+          deviceType: app.deviceType,
+          startTime: app.startTime,
+          status: ConnectionStatus.DISCONNECTED,
+          port: app.port,
+          authToken: app.authToken
+        });
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error(`Error adding app from URL: ${errorMessage}`);
+        res.status(500).json({ error: errorMessage });
+      }
+    });
+
     // Start monitoring an app
     this.app.post('/api/apps/:id/monitor', async (req, res) => {
       try {

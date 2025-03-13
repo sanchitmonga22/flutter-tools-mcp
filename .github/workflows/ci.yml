@@ -26,7 +26,7 @@ jobs:
     
     - name: Install dependencies
       run: cd mcp && npm ci
-    
+      
     - name: Build
       run: cd mcp && npm run build
       

@@ -96,6 +96,24 @@ export class ConnectorClient {
   }
 
   /**
+   * Add a Flutter app by VM service URL
+   * @param vmServiceUrl The VM service URL (e.g., ws://127.0.0.1:55285/hqyzYdQKcLg=/ws)
+   * @param deviceType The type of device (optional)
+   */
+  public async addAppFromUrl(vmServiceUrl: string, deviceType?: string): Promise<FlutterAppInfo | null> {
+    try {
+      const response = await this.client.post('/api/apps/from-url', {
+        vmServiceUrl,
+        deviceType
+      });
+      return response.data;
+    } catch (error) {
+      this.handleError(`Error adding Flutter app from URL ${vmServiceUrl}`, error);
+      return null;
+    }
+  }
+
+  /**
    * Start monitoring a Flutter app
    * @param appId The ID of the app
    */

@@ -6,6 +6,7 @@ import { z } from "zod";
 // Import tool implementations
 import { listFlutterApps } from "./tools/list-flutter-apps.js";
 import { connectToApp } from "./tools/connect-to-app.js";
+import { connectByUrl } from "./tools/connect-by-url.js";
 import { getAppLogs } from "./tools/get-app-logs.js";
 import { getPerformanceMetrics } from "./tools/get-performance-metrics.js";
 import { getNetworkRequests } from "./tools/get-network-requests.js";
@@ -36,6 +37,15 @@ server.tool(
     appId: z.string().describe("The ID of the Flutter app to connect to")
   },
   connectToApp
+);
+
+server.tool(
+  "connect-by-url",
+  "Connect to a Flutter app by VM service URL",
+  {
+    vmServiceUrl: z.string().describe("The VM service URL (e.g., ws://127.0.0.1:55285/hqyzYdQKcLg=/ws)")
+  },
+  connectByUrl
 );
 
 // Log and Metrics Collection Tools

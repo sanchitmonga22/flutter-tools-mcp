@@ -166,6 +166,52 @@ export class AppDiscoveryService extends EventEmitter {
   }
 
   /**
+   * Parse a VM service URL to extract port and auth token
+   * @param vmServiceUrl The VM service URL (e.g., ws://127.0.0.1:55285/hqyzYdQKcLg=/ws)
+   * @returns Object containing port and authToken, or null if parsing failed
+   */
+  public parseVmServiceUrl(vmServiceUrl: string): { port: number; authToken: string } | null {
+    try {
+      // Handle both ws:// and http:// URLs
+      const url = new URL(vmServiceUrl);
+      
+      // Extract port
+      const port = parseInt(url.port, 10);
+      if (isNaN(port)) {
+        logger.error(`Failed to parse port from VM service URL: ${vmServiceUrl}`);
+        return null;
+      }
+      
+      // Extract auth token from path
+      // The path is typically in the format: /AUTH_TOKEN/ws or /AUTH_TOKEN/
+      const pathParts = url.pathname.split('/').filter(part => part.length > 0);
+      const authToken = pathParts.length > 0 ? pathParts[0] : '';
+      
+      logger.debug(`Parsed VM service URL: port=${port}, authToken=${authToken}`);
+      return { port, authToken };
+    } catch (err) {
+      logger.error(`Failed to parse VM service URL: ${vmServiceUrl}`, err);
+      return null;
+    }
+  }
+
+  /**
+   * Add a Flutter app from a VM service URL
+   * @param vmServiceUrl The VM service URL (e.g., ws://127.0.0.1:55285/hqyzYdQKcLg=/ws)
+   * @param deviceType Optional device type
+   * @returns The added Flutter app, or null if adding failed
+   */
+  public async addAppFromUrl(vmServiceUrl: string, deviceType: string = 'custom'): Promise<FlutterApp | null> {
+    const parsedUrl = this.parseVmServiceUrl(vmServiceUrl);
+    if (!parsedUrl) {
+      return null;
+    }
+    
+    const { port, authToken } = parsedUrl;
+    return this.addApp(port, '127.0.0.1', deviceType, authToken);
+  }
+
+  /**
    * Run a scan for Flutter apps
    */
   private async discover(): Promise<void> {

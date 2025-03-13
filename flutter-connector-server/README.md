@@ -41,6 +41,23 @@ npm run dev
 
 The server will run on port 5051 by default.
 
+### Connecting to Flutter Apps
+
+When a Flutter app is running in debug mode, it exposes a VM Service URL that looks like:
+```
+Connecting to VM Service at ws://127.0.0.1:55285/xxxxxxxxxxxx=/ws
+```
+
+You can connect to this app in two ways:
+
+1. **Automatic Discovery**: The server will automatically scan ports to find Flutter apps, but this may not work for apps that require authentication tokens.
+
+2. **Manual Connection with VM Service URL** (Recommended):
+   ```bash
+   curl -X POST http://localhost:5051/api/apps/from-url -H "Content-Type: application/json" -d '{"vmServiceUrl": "ws://127.0.0.1:55285/xxxxxxxxxxxx=/ws"}'
+   ```
+   This method is more reliable as it correctly extracts the port and authentication token from the URL.
+
 ## API Reference
 
 ### Base URL
@@ -54,7 +71,8 @@ http://localhost:5051
 - `GET /api/info` - Get server information
 - `GET /api/apps` - List all discovered Flutter apps
 - `GET /api/apps/:id` - Get details for a specific app
-- `POST /api/apps` - Manually add a Flutter app
+- `POST /api/apps` - Manually add a Flutter app by port
+- `POST /api/apps/from-url` - Add a Flutter app using VM service URL (recommended)
 - `POST /api/apps/:id/monitor` - Start monitoring an app
 - `POST /api/apps/:id/stop` - Stop monitoring an app
 - `GET /api/apps/:id/logs` - Get logs for an app
