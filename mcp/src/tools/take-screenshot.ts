@@ -33,7 +33,7 @@ export async function takeScreenshot(args: { appId: string }): Promise<any> {
         content: [
           {
             type: "text",
-            text: `Failed to capture screenshot for ${app.name}`
+            text: `Failed to capture screenshot for ${app.name}. This may be because the Flutter VM service doesn't support the screenshot method, which is common for certain Flutter versions or when running on certain platforms.`
           }
         ]
       };

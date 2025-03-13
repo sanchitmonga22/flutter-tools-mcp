@@ -7,13 +7,13 @@ const connectorClient = new ConnectorClient();
 /**
  * Format memory metrics for display
  */
-function formatMemoryMetrics(metrics: PerformanceMetrics['memoryUsage']): string {
+function formatMemoryMetrics(metrics: any): string {
   if (!metrics) return 'No memory metrics available';
   
-  const heapSizeMB = (metrics.heapSize / (1024 * 1024)).toFixed(2);
-  const heapUsedMB = (metrics.heapUsed / (1024 * 1024)).toFixed(2);
-  const externalMB = (metrics.external / (1024 * 1024)).toFixed(2);
-  const usagePercentage = ((metrics.heapUsed / metrics.heapSize) * 100).toFixed(1);
+  const heapSizeMB = (metrics.heapCapacity / (1024 * 1024)).toFixed(2);
+  const heapUsedMB = (metrics.heapUsage / (1024 * 1024)).toFixed(2);
+  const externalMB = (metrics.externalUsage / (1024 * 1024)).toFixed(2);
+  const usagePercentage = ((metrics.heapUsage / metrics.heapCapacity) * 100).toFixed(1);
   
   return `Memory Usage:\n` +
          `  Heap Size: ${heapSizeMB} MB\n` +
@@ -72,10 +72,12 @@ export async function getPerformanceMetrics(args: {
       };
     }
     
-    // Get the metrics
-    const metrics = await connectorClient.getMetrics(appId, metric);
+    // Get the metrics - the API returns an array of metrics
+    const metricsArray: any[] = await connectorClient.getMetrics(appId, metric);
     
-    if (!metrics) {
+    console.log('Metrics array:', JSON.stringify(metricsArray).substring(0, 200) + '...');
+    
+    if (!metricsArray || metricsArray.length === 0) {
       return {
         content: [
           {
@@ -86,21 +88,40 @@ export async function getPerformanceMetrics(args: {
       };
     }
     
+    // Get the most recent metric
+    const latestMetric = metricsArray[metricsArray.length - 1];
+    console.log('Latest metric:', JSON.stringify(latestMetric));
+    
+    const timestamp = latestMetric.timestamp;
+    
     // Format the metrics based on what was requested
     let formattedMetrics = '';
     
-    if (metric === 'all') {
-      formattedMetrics = [
-        formatMemoryMetrics(metrics.memoryUsage),
-        formatCpuMetrics(metrics.cpuUsage),
-        formatUiMetrics(metrics.uiMetrics)
-      ].join('\n\n');
-    } else if (metric === 'memory') {
-      formattedMetrics = formatMemoryMetrics(metrics.memoryUsage);
-    } else if (metric === 'cpu') {
-      formattedMetrics = formatCpuMetrics(metrics.cpuUsage);
-    } else if (metric === 'ui') {
-      formattedMetrics = formatUiMetrics(metrics.uiMetrics);
+    if (metric === 'all' || metric === 'memory') {
+      if (latestMetric.memory) {
+        console.log('Memory metrics:', JSON.stringify(latestMetric.memory));
+        formattedMetrics += formatMemoryMetrics(latestMetric.memory);
+      } else {
+        formattedMetrics += 'No memory metrics available';
+      }
+    }
+    
+    if (metric === 'all' || metric === 'cpu') {
+      if (formattedMetrics) formattedMetrics += '\n\n';
+      if (latestMetric.cpu) {
+        formattedMetrics += formatCpuMetrics(latestMetric.cpu);
+      } else {
+        formattedMetrics += 'No CPU metrics available';
+      }
+    }
+    
+    if (metric === 'all' || metric === 'ui') {
+      if (formattedMetrics) formattedMetrics += '\n\n';
+      if (latestMetric.ui) {
+        formattedMetrics += formatUiMetrics(latestMetric.ui);
+      } else {
+        formattedMetrics += 'No UI metrics available';
+      }
     }
     
     return {
@@ -108,12 +129,13 @@ export async function getPerformanceMetrics(args: {
         {
           type: "text",
           text: `Performance Metrics for ${app.name}:\n` +
-                `Collected at: ${new Date(metrics.timestamp).toLocaleString()}\n\n` +
+                `Collected at: ${new Date(timestamp).toLocaleString()}\n\n` +
                 formattedMetrics
         }
       ]
     };
   } catch (error) {
+    console.error('Error in getPerformanceMetrics:', error);
     return {
       content: [
         {

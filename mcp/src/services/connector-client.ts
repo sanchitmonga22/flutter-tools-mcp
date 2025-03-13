@@ -13,7 +13,7 @@ export class ConnectorClient {
    * Create a new connector client
    * @param baseUrl The base URL of the Flutter Connector Server
    */
-  constructor(baseUrl: string = 'http://localhost:3000') {
+  constructor(baseUrl: string = 'http://localhost:5051') {
     this.baseUrl = baseUrl;
     this.client = axios.create({
       baseURL: baseUrl,
@@ -158,14 +158,14 @@ export class ConnectorClient {
    * @param appId The ID of the Flutter app
    * @param metric Specific metric to retrieve (optional)
    */
-  public async getMetrics(appId: string, metric?: string): Promise<PerformanceMetrics | null> {
+  public async getMetrics(appId: string, metric?: string): Promise<any[]> {
     try {
       const params = metric ? { metric } : {};
       const response = await this.client.get(`/api/apps/${appId}/metrics`, { params });
       return response.data;
     } catch (error) {
       this.handleError(`Failed to get metrics for app ${appId}`, error);
-      return null;
+      return [];
     }
   }
 
