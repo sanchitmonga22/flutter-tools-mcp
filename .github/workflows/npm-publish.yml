@@ -5,7 +5,7 @@ on:
     types: [created]
 
 jobs:
-  build:
+  publish-mcp:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -15,12 +15,38 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
       
       - name: Install dependencies
-        run: npm ci
+        run: cd mcp && npm ci
       
       - name: Build
-        run: npm run build
+        run: cd mcp && npm run build
+      
+      - name: Update package name
+        run: cd mcp && npm pkg set name=@smonga/flutter-mcp
       
       - name: Publish to npm
-        run: npm publish
+        run: cd mcp && npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{secrets.NPM_TOKEN}}
+          
+  publish-connector:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 18
+          registry-url: 'https://registry.npmjs.org'
+      
+      - name: Install dependencies
+        run: cd flutter-connector-server && npm ci
+      
+      - name: Build
+        run: cd flutter-connector-server && npm run build
+      
+      - name: Update package name
+        run: cd flutter-connector-server && npm pkg set name=@smonga/flutter-connector-server
+      
+      - name: Publish to npm
+        run: cd flutter-connector-server && npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{secrets.NPM_TOKEN}} 

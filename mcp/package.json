@@ -1,11 +1,12 @@
 {
-  "name": "flutter-tools-mcp",
+  "name": "@smonga/flutter-mcp",
   "version": "1.0.0",
   "description": "MCP Server for Flutter Tools",
   "type": "module",
   "main": "build/index.js",
   "bin": {
-    "flutter-tools-mcp": "./build/index.js"
+    "@smonga/flutter-mcp": "./build/index.js",
+    "flutter-mcp": "./build/index.js"
   },
   "scripts": {
     "build": "tsc && chmod 755 build/index.js",
@@ -20,7 +21,7 @@
     "monitoring",
     "debugging"
   ],
-  "author": "",
+  "author": "sanchitmonga22",
   "license": "MIT",
   "engines": {
     "node": ">=18.0.0"
@@ -41,5 +42,13 @@
     "nodemon": "^3.0.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sanchitmonga22/flutter-tools-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sanchitmonga22/flutter-tools-mcp/issues"
+  },
+  "homepage": "https://github.com/sanchitmonga22/flutter-tools-mcp#readme"
 }

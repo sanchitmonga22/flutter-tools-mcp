@@ -7,7 +7,7 @@ on:
     branches: [ main ]
 
 jobs:
-  build:
+  build-mcp:
     runs-on: ubuntu-latest
     
     strategy:
@@ -22,9 +22,39 @@ jobs:
       with:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
+        cache-dependency-path: 'mcp/package.json'
     
     - name: Install dependencies
-      run: npm ci
+      run: cd mcp && npm ci
     
     - name: Build
-      run: npm run build 
+      run: cd mcp && npm run build
+      
+    - name: Test
+      run: cd mcp && npm test
+      
+  build-connector:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Use Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v3
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+        cache-dependency-path: 'flutter-connector-server/package.json'
+    
+    - name: Install dependencies
+      run: cd flutter-connector-server && npm ci
+    
+    - name: Build
+      run: cd flutter-connector-server && npm run build
+      
+    - name: Test
+      run: cd flutter-connector-server && npm test

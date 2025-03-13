@@ -1,11 +1,15 @@
 {
-  "name": "flutter-connector-server",
+  "name": "@smonga/flutter-connector-server",
   "version": "1.0.0",
   "description": "A standalone server for monitoring and controlling Flutter applications",
   "type": "module",
   "main": "dist/server.js",
+  "bin": {
+    "@smonga/flutter-connector-server": "./dist/server.js",
+    "flutter-connector-server": "./dist/server.js"
+  },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && chmod 755 dist/server.js",
     "start": "node dist/server.js",
     "dev": "nodemon --exec node --loader ts-node/esm src/server.ts",
     "test": "jest"
@@ -17,7 +21,7 @@
     "vm-service",
     "debugging"
   ],
-  "author": "",
+  "author": "sanchitmonga22",
   "license": "MIT",
   "engines": {
     "node": ">=18.0.0"
@@ -40,5 +44,13 @@
     "nodemon": "^3.0.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sanchitmonga22/flutter-tools-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sanchitmonga22/flutter-tools-mcp/issues"
+  },
+  "homepage": "https://github.com/sanchitmonga22/flutter-tools-mcp#readme"
 }
