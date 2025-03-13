@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { json } from 'body-parser';
+import bodyParser from 'body-parser';
 import { ServerConfig, ConnectionStatus, FlutterAppInfo, HotReloadOptions } from '../types/index.js';
 import { AppDiscoveryService } from '../services/app-discovery.js';
 import { AppMonitorService } from '../services/app-monitor.js';
@@ -82,7 +82,7 @@ export class RestServer {
     this.app.use(cors());
 
     // Parse JSON bodies
-    this.app.use(json());
+    this.app.use(bodyParser.json());
 
     // Request logging middleware
     this.app.use((req, res, next) => {
@@ -125,7 +125,8 @@ export class RestServer {
           status,
           port: app.port,
           pid: app.pid,
-          packageName: app.packageName
+          packageName: app.packageName,
+          authToken: app.authToken
         };
       });
       
@@ -151,7 +152,8 @@ export class RestServer {
         status,
         port: app.port,
         pid: app.pid,
-        packageName: app.packageName
+        packageName: app.packageName,
+        authToken: app.authToken
       };
       
       res.json(appInfo);
@@ -160,13 +162,13 @@ export class RestServer {
     // Manually add an app
     this.app.post('/api/apps', async (req, res) => {
       try {
-        const { port, hostname, deviceType } = req.body;
+        const { port, hostname, deviceType, authToken } = req.body;
         if (!port) {
           res.status(400).json({ error: 'Port is required' });
           return;
         }
 
-        const app = await this.appDiscoveryService.addApp(port, hostname, deviceType);
+        const app = await this.appDiscoveryService.addApp(port, hostname, deviceType, authToken);
         if (!app) {
           res.status(404).json({ error: 'Could not connect to Flutter app at the specified port' });
           return;
@@ -178,7 +180,8 @@ export class RestServer {
           deviceType: app.deviceType,
           startTime: app.startTime,
           status: ConnectionStatus.DISCONNECTED,
-          port: app.port
+          port: app.port,
+          authToken: app.authToken
         });
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);

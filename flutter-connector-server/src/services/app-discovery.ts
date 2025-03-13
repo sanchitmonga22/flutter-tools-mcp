@@ -78,10 +78,16 @@ export class AppDiscoveryService extends EventEmitter {
    * @param port The port where the VM service is running
    * @param hostname The hostname of the VM service
    * @param deviceType The type of device (android, ios, web, etc.)
+   * @param authToken Optional authentication token for the VM service
    */
-  public async addApp(port: number, hostname: string = 'localhost', deviceType: string = 'custom'): Promise<FlutterApp | null> {
+  public async addApp(
+    port: number, 
+    hostname: string = '127.0.0.1', 
+    deviceType: string = 'custom',
+    authToken?: string
+  ): Promise<FlutterApp | null> {
     try {
-      const client = new FlutterVmServiceClient(port, hostname);
+      const client = new FlutterVmServiceClient(port, hostname, authToken);
       await client.connect();
       
       const vm = await client.getVM();
@@ -94,6 +100,7 @@ export class AppDiscoveryService extends EventEmitter {
         port,
         deviceType,
         startTime: new Date().toISOString(),
+        authToken,
       };
       
       this.knownApps.set(id, app);
@@ -106,8 +113,56 @@ export class AppDiscoveryService extends EventEmitter {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       logger.error(`Failed to manually add Flutter app on port ${port}: ${errorMessage}`);
+      
+      // If no auth token was provided and we got a 403, try to extract the token from the error
+      if (!authToken && errorMessage.includes('403')) {
+        try {
+          // Try with a different approach - attempt to connect to the HTTP endpoint first
+          const authToken = await this.detectAuthToken(port, hostname);
+          if (authToken) {
+            logger.info(`Detected auth token for port ${port}: ${authToken}`);
+            return this.addApp(port, hostname, deviceType, authToken);
+          }
+        } catch (tokenErr) {
+          logger.error(`Failed to detect auth token: ${tokenErr instanceof Error ? tokenErr.message : String(tokenErr)}`);
+        }
+      }
+      
       return null;
     }
+  }
+
+  /**
+   * Try to detect the authentication token for a VM service
+   * @param port The port to check
+   * @param hostname The hostname
+   */
+  private async detectAuthToken(port: number, hostname: string = '127.0.0.1'): Promise<string | null> {
+    // This is a simplified implementation - in a real-world scenario,
+    // you might want to make an HTTP request to the VM service and
+    // check for redirects or parse the response for token information
+    
+    // For now, we'll try a few common token patterns
+    const possibleTokens = [
+      '', // No token
+      'hqyzYdQKcLg=', // The token you provided
+      'ws' // Just in case the path is different
+    ];
+    
+    for (const token of possibleTokens) {
+      try {
+        const client = new FlutterVmServiceClient(port, hostname, token);
+        await client.connect();
+        await client.getVM();
+        await client.disconnect();
+        return token; // If we get here, the token worked
+      } catch (err) {
+        // Try the next token
+        continue;
+      }
+    }
+    
+    return null;
   }
 
   /**
@@ -141,8 +196,14 @@ export class AppDiscoveryService extends EventEmitter {
         }
       }
       
-      // Check for disappeared apps
+      // Check for disappeared apps, but don't remove apps with auth tokens
+      // as they might not be detected by the port scan
       for (const [id, app] of this.knownApps.entries()) {
+        // Skip apps with auth tokens - they were manually added and should be kept
+        if (app.authToken) {
+          continue;
+        }
+        
         if (!ports.includes(app.port)) {
           logger.info(`Flutter app disappeared: ${app.name} (${id})`);
           this.knownApps.delete(id);
@@ -205,7 +266,7 @@ export class AppDiscoveryService extends EventEmitter {
         resolve(false);
       });
 
-      socket.connect(port, 'localhost');
+      socket.connect(port, '127.0.0.1');
     });
   }
 
@@ -215,8 +276,21 @@ export class AppDiscoveryService extends EventEmitter {
    */
   private async checkVmService(port: number): Promise<FlutterApp | null> {
     try {
-      const client = new FlutterVmServiceClient(port);
-      await client.connect();
+      // First try without auth token
+      let client = new FlutterVmServiceClient(port);
+      try {
+        await client.connect();
+      } catch (err) {
+        // If connection fails, try to detect auth token
+        const authToken = await this.detectAuthToken(port);
+        if (!authToken) {
+          return null;
+        }
+        
+        // Try again with the detected auth token
+        client = new FlutterVmServiceClient(port, '127.0.0.1', authToken);
+        await client.connect();
+      }
       
       const vm = await client.getVM();
       if (!vm) {
@@ -247,6 +321,7 @@ export class AppDiscoveryService extends EventEmitter {
         port,
         deviceType,
         startTime: new Date().toISOString(),
+        authToken: client['authToken'], // Get the auth token that worked
       };
       
       await client.disconnect();

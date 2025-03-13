@@ -32,7 +32,12 @@ export class FlutterAppMonitor extends EventEmitter {
     } = {}
   ) {
     super();
-    this.client = new FlutterVmServiceClient(app.port, 'localhost', this.handleDisconnect.bind(this));
+    this.client = new FlutterVmServiceClient(
+      app.port, 
+      '127.0.0.1', 
+      app.authToken,
+      this.handleDisconnect.bind(this)
+    );
     this.maxLogEntries = maxLogEntries;
     this.maxMetricsEntries = maxMetricsEntries;
     this.maxNetworkEntries = maxNetworkEntries;

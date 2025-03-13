@@ -38,6 +38,8 @@ export interface FlutterApp {
   pid?: number;
   /** Package name or bundle identifier, if known */
   packageName?: string;
+  /** Authentication token for VM service, if required */
+  authToken?: string;
 }
 
 /**
@@ -170,6 +172,8 @@ export interface FlutterAppInfo {
   pid?: number;
   /** Package name or bundle identifier, if known */
   packageName?: string;
+  /** Authentication token for VM service, if required */
+  authToken?: string;
 }
 
 /**

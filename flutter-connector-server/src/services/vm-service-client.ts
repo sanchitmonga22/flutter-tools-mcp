@@ -22,14 +22,21 @@ export class FlutterVmServiceClient implements VmServiceClient {
   /**
    * Create a new VM Service client
    * @param port The port where the VM service is running
-   * @param hostname The hostname of the VM service, defaults to localhost
+   * @param hostname The hostname of the VM service, defaults to 127.0.0.1
+   * @param authToken Optional authentication token for the VM service
    */
   constructor(
     private port: number,
-    private hostname: string = 'localhost',
+    private hostname: string = '127.0.0.1',
+    private authToken?: string,
     private onDisconnect?: () => void
   ) {
-    this.url = `ws://${hostname}:${port}/ws`;
+    // If an auth token is provided, include it in the URL path
+    if (authToken) {
+      this.url = `ws://${hostname}:${port}/${authToken}/ws`;
+    } else {
+      this.url = `ws://${hostname}:${port}/ws`;
+    }
   }
 
   /**
